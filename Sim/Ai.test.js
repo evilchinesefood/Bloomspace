@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createWorld, spawnSeedling, STATE, OWNER_NEUTRAL } from "./World.js";
+import { createWorld, STATE, OWNER_NEUTRAL } from "./World.js";
 import { updateAi, checkVictory } from "./Ai.js";
 import Sim from "./World.js";
 
