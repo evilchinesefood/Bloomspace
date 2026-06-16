@@ -199,7 +199,7 @@ export function createHud(root, api) {
     max: 100,
     value: 50,
     step: 5,
-    withTooltip: true,
+    "with-tooltip": true,
     style: "width:100%;margin-bottom:.8rem;",
   });
   const syncFrac = () =>

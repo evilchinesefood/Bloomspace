@@ -76,10 +76,11 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     style: "--width:30rem;",
   });
   // Keep the dialog from closing itself on overlay/Escape without our cleanup.
+  // `cleanup()` latches via `done` so exactly one of onCancel/onConfirm ever fires — a
+  // successful Start (which removes the wrap) won't also emit a trailing wa-hide → onCancel.
   dialog.addEventListener("wa-hide", (e) => {
     if (e.target !== dialog) return;
-    cleanup();
-    onCancel && onCancel();
+    if (cleanup()) onCancel && onCancel();
   });
 
   const field = (labelText, control) =>
@@ -102,7 +103,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     max: 60,
     value: 24,
     step: 1,
-    withTooltip: true,
+    "with-tooltip": true,
     style: "width:100%;",
   });
 
@@ -143,12 +144,15 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
   });
   dialog.append(cancelBtn, startBtn);
 
+  let done = false;
   function cleanup() {
+    if (done) return false;
+    done = true;
     wrap.remove();
+    return true;
   }
   cancelBtn.addEventListener("click", () => {
-    cleanup();
-    onCancel && onCancel();
+    if (cleanup()) onCancel && onCancel();
   });
   startBtn.addEventListener("click", () => {
     const size = SIZES[sizeSel.value] || SIZES.medium;
@@ -162,7 +166,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
       players.push({ id: i, isAi: true, difficulty });
     // Match seed: fresh per match — allowed ONLY in the UI layer.
     const seed = (Math.random() * 0xffffffff) >>> 0;
-    cleanup();
+    if (!cleanup()) return;
     onConfirm({
       width: size.width,
       height: size.height,
