@@ -1,13 +1,16 @@
-// Main.js — bootstrap + the game loop. Fixed-step accumulator at ~30 Hz; render once
-// per rAF with interpolation alpha. Sim is frame-rate independent; render interpolates.
-import { createGame } from "./Game.js";
+// Main.js — bootstrap + the game loop. Fixed-step accumulator at ~30 Hz; render once per
+// rAF with interpolation alpha. The App controller owns the match lifecycle; this loop
+// asks it whether to step (PLAYING and not paused) and at what speed, then always renders
+// so the scene stays visible behind menus. Speed scales sim time into the accumulator.
+import { createApp } from "./Ui/App.js";
 
 const STEP = 1 / 30; // fixed sim timestep (seconds)
 const MAX_STEPS = 5; // cap steps/frame to avoid spiral-of-death
 
 function boot() {
   const canvas = document.getElementById("Canvas");
-  const game = createGame(canvas);
+  const root = document.getElementById("Ui");
+  const app = createApp(canvas, root);
 
   let last = performance.now();
   let acc = 0;
@@ -16,19 +19,25 @@ function boot() {
     let elapsed = (now - last) / 1000;
     last = now;
     if (elapsed > 0.25) elapsed = 0.25; // clamp huge gaps (tab unfocus)
-    acc += elapsed;
 
-    // Sim.step snapshots x->px,y->py at the start of each tick, so render can lerp.
-    let steps = 0;
-    while (acc >= STEP && steps < MAX_STEPS) {
-      game.step(STEP);
-      acc -= STEP;
-      steps++;
+    // Only accumulate sim time while actively playing. Speed (1×/2×/3×) scales the time
+    // fed into the fixed-step accumulator; pause/menus contribute zero so the sim freezes.
+    if (app.shouldStep()) {
+      acc += elapsed * app.getSpeed();
+      let steps = 0;
+      while (acc >= STEP && steps < MAX_STEPS) {
+        app.step(STEP);
+        acc -= STEP;
+        steps++;
+      }
+      if (steps === MAX_STEPS) acc = 0; // drop backlog rather than spiral
+    } else {
+      acc = 0; // don't bank time while paused/in menus
     }
-    if (steps === MAX_STEPS) acc = 0; // drop backlog rather than spiral
 
+    app.tick(); // HUD refresh + win/lose detection
     const alpha = acc / STEP;
-    game.render(alpha);
+    app.render(alpha);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

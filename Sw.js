@@ -1,6 +1,6 @@
 // Sw.js — service worker. Cache-first with network fallback.
 // IMPORTANT: bump CACHE_VERSION on EVERY deploy or clients keep stale assets.
-const CACHE_VERSION = "bloomspace-v1";
+const CACHE_VERSION = "bloomspace-v2";
 
 // App shell + heavy vendored deps. Web Awesome statically imports a graph of chunks from
 // its loader and also lazy-loads component chunks on demand; that recursive chunk graph is
@@ -14,9 +14,24 @@ const SHELL = [
   "Game.js",
   "Manifest.webmanifest",
   "Icons/Icon.svg",
+  "Ui/App.js",
+  "Ui/Hud.js",
+  "Ui/Menus.js",
+  "Ui/Input.js",
   "Sim/World.js",
+  "Sim/MapGen.js",
+  "Sim/Seedlings.js",
+  "Sim/Combat.js",
+  "Sim/Economy.js",
+  "Sim/Trees.js",
+  "Sim/Ai.js",
   "Render/Scene.js",
   "Render/SeedlingView.js",
+  "Render/AsteroidView.js",
+  "Render/TreeView.js",
+  "Render/Fx.js",
+  "Render/Picking.js",
+  "Render/Palette.js",
   "Vendor/Three/Three.module.js",
   "Vendor/Three/Jsm/postprocessing/EffectComposer.js",
   "Vendor/Three/Jsm/postprocessing/RenderPass.js",
