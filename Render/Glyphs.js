@@ -7,7 +7,8 @@ import * as THREE from "three";
 export const ICON = {
   fighter: 0xe518, // jet-fighter-up  (free stand-in for a "starfighter")
   defender: 0xf197, // shuttle-space   (free stand-in for a defensive "freighter")
-  tree: 0xf1bb, // tree            (seedling tree)
+  sprout: 0xf4d8, // seedling        (young seedling tree)
+  tree: 0xf1bb, // tree            (mature seedling tree)
   shield: 0xf3ed, // shield-halved   (defense tree)
 };
 

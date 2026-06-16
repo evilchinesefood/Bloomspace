@@ -36,19 +36,23 @@ export function createScene(canvas, world) {
 
   const scene = new THREE.Scene();
 
-  // --- Starfield background: dim points scattered across the world + a wide margin, so the
-  // backdrop reads as deep space at any zoom/pan. Two tiers for depth; kept dim so they
-  // don't bloom into big blobs. Cosmetic only (render-side Math.random is fine here).
+  // --- Starfield background: dim points across the world + a wide margin so the backdrop
+  // reads as deep space at any zoom/pan, with a subtle downward parallax drift (matching the
+  // start-menu starfield). Kept below the bloom threshold so they stay crisp dots.
+  const starTiers = []; // { geo, speeds, bottom, top }
   function addStars() {
     const margin = Math.max(world.width, world.height);
+    const bottom = -margin;
     const spanX = world.width + 2 * margin;
     const spanY = world.height + 2 * margin;
-    const tier = (count, size, opacity, hex) => {
+    const tier = (count, size, opacity, hex, baseSpd) => {
       const pos = new Float32Array(count * 3);
+      const speeds = new Float32Array(count);
       for (let i = 0; i < count; i++) {
-        pos[i * 3] = -margin + Math.random() * spanX;
-        pos[i * 3 + 1] = -margin + Math.random() * spanY;
+        pos[i * 3] = bottom + Math.random() * spanX;
+        pos[i * 3 + 1] = bottom + Math.random() * spanY;
         pos[i * 3 + 2] = -20;
+        speeds[i] = baseSpd * (0.6 + Math.random() * 0.8); // varied = parallax
       }
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
@@ -61,13 +65,29 @@ export function createScene(canvas, world) {
         depthWrite: false,
       });
       scene.add(new THREE.Points(g, m));
+      starTiers.push({ geo: g, speeds, bottom, top: bottom + spanY });
     };
-    // Kept below the bloom threshold so they stay crisp dots (no blocky bloom halos).
-    tier(700, 1.3, 0.5, 0x7f8eac); // faint distant dust
-    tier(240, 1.8, 0.6, 0xa6b1c8); // medium stars
-    tier(40, 2.0, 0.55, 0x7d9ed8); // a few cool-blue accents
+    // Same palette as the menu starfield; near tiers drift a touch faster (parallax).
+    tier(700, 1.3, 0.5, 0x7f8eac, 2);
+    tier(260, 1.8, 0.65, 0xa6b1c8, 5);
+    tier(120, 1.7, 0.6, 0xdfe6f5, 4);
+    tier(40, 2.1, 0.6, 0x7d9ed8, 8);
   }
   addStars();
+
+  // Subtle starfield drift (downward), wrapping. Called each render frame with dt.
+  function driftStars(dt) {
+    for (const t of starTiers) {
+      const p = t.geo.attributes.position.array;
+      const sp = t.speeds;
+      for (let i = 0; i < sp.length; i++) {
+        let y = p[i * 3 + 1] - sp[i] * dt; // screen-down = world -y
+        if (y < t.bottom) y = t.top;
+        p[i * 3 + 1] = y;
+      }
+      t.geo.attributes.position.needsUpdate = true;
+    }
+  }
 
   // Orthographic top-down camera framing the whole world.
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 1000);
@@ -253,6 +273,7 @@ export function createScene(canvas, world) {
     resetCamera,
     setBloomEnabled,
     disposeControls,
+    driftStars,
     // Live zoom factor (1 = fit-all, >1 = zoomed in).
     getZoom: () => zoom,
     // World units covered by one screen pixel at the current zoom — drives apparent-size

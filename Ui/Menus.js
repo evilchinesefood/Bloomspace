@@ -56,7 +56,7 @@ function startStarfield(canvas) {
         x: Math.random() * w,
         y: Math.random() * h,
         r: (0.5 + depth * 1.6) * dpr,
-        spd: (6 + depth * 26) * dpr, // px/sec — near stars drift faster (parallax)
+        spd: (2 + depth * 10) * dpr, // px/sec — subtle drift; near stars faster (parallax)
         a: 0.35 + depth * 0.5,
         c: COLORS[Math.floor(Math.random() * COLORS.length)],
       });

@@ -32,6 +32,18 @@ function ensureCap(n) {
   }
 }
 
+// Reused buffers for the same-home engagement pass (no per-tick allocation).
+const MAXO = 8; // max owner id + 1 (1 human + a few AI)
+let engaged = new Uint8Array(0);
+let strAt = new Float32Array(0); // [asteroid*MAXO + owner] -> strength sum on that rock
+let totAt = new Float32Array(0); // [asteroid] -> total orbiting strength
+function ensureHomeBufs(seedCap, astCount) {
+  if (engaged.length < seedCap)
+    engaged = new Uint8Array(Math.max(seedCap, engaged.length * 2, 256));
+  if (strAt.length < astCount * MAXO) strAt = new Float32Array(astCount * MAXO);
+  if (totAt.length < astCount) totAt = new Float32Array(astCount);
+}
+
 // Pack two 16-bit-ish cell coords into one key. Offset keeps negatives non-negative.
 const BIAS = 1 << 15;
 const key = (cx, cy) => ((cx + BIAS) << 16) | (cy + BIAS);
@@ -66,45 +78,66 @@ export function resolveCombat(world, dt) {
   if (s.count === 0) return;
   rebuildGrid(world);
 
-  // Damage pass: fixed ascending order; damage is independent per pair so within-tick
-  // order can't change the outcome. We accumulate into energy directly (each seedling is
-  // damaged by every enemy in contact; symmetric pairs both take their hit).
-  // Track who is currently in contact for STATE tinting.
+  const A = world.asteroids.length;
+  ensureHomeBufs(s.capacity, A);
+  engaged.fill(0, 0, s.count);
+
+  // Proximity damage: enemies within CONTACT_RADIUS (fly-bys + converging ships). Damage is
+  // read from `strength` (not the depleted `energy`), so the pass is order-independent.
   for (let i = 0; i < s.count; i++) {
     const oi = s.owner[i];
     const cx = grid.cx[i];
     const cy = grid.cy[i];
     const xi = s.x[i];
     const yi = s.y[i];
-    let inContact = false;
     for (let gx = cx - 1; gx <= cx + 1; gx++) {
       for (let gy = cy - 1; gy <= cy + 1; gy++) {
         const bucket = grid.cells.get(key(gx, gy));
         if (!bucket) continue;
         for (let b = 0; b < bucket.length; b++) {
           const j = bucket[b];
-          if (j === i) continue;
-          if (s.owner[j] === oi) continue; // no friendly fire
+          if (j === i || s.owner[j] === oi) continue; // no friendly fire
           const dx = s.x[j] - xi;
           const dy = s.y[j] - yi;
           if (dx * dx + dy * dy > R2) continue;
-          inContact = true;
-          // i takes damage from j's strength. (j is handled when its own loop runs.)
+          engaged[i] = 1;
           s.energy[i] -= s.strength[j] * COMBAT_RATE * dt;
         }
       }
     }
-    // Mark slain now; do NOT kill mid-scan (would corrupt indices for later i).
-    // A unit that dies this tick still dealt its damage above (outgoing damage reads
-    // `strength`, never the depleted `energy`) — deliberate simultaneous resolution. Do
-    // NOT "fix" this into an order-dependent two-phase pass; it would break determinism.
-    if (s.energy[i] <= 0) {
-      s.state[i] = STATE.DEAD;
-    } else if (s.state[i] !== STATE.TRANSIT) {
-      // Tint: ORBIT seedlings in contact show COMBAT; revert to ORBIT when clear.
-      // Never override TRANSIT (movement reads state) or DEAD.
-      s.state[i] = inContact ? STATE.COMBAT : STATE.ORBIT;
+  }
+
+  // Same-home engagement: ANY two enemy ships orbiting the same rock fight every tick,
+  // regardless of orbit distance — there's never a peaceful stand-off on a shared rock.
+  // (Transit ships are en route, not "on" a rock; proximity covers their fly-bys.)
+  strAt.fill(0, 0, A * MAXO);
+  totAt.fill(0, 0, A);
+  for (let i = 0; i < s.count; i++) {
+    if (s.state[i] === STATE.TRANSIT) continue;
+    const h = s.home[i];
+    const o = s.owner[i];
+    if (h < 0 || h >= A || o < 0 || o >= MAXO) continue;
+    strAt[h * MAXO + o] += s.strength[i];
+    totAt[h] += s.strength[i];
+  }
+  for (let i = 0; i < s.count; i++) {
+    if (s.state[i] === STATE.TRANSIT) continue;
+    const h = s.home[i];
+    const o = s.owner[i];
+    if (h < 0 || h >= A || o < 0 || o >= MAXO) continue;
+    const enemyStr = totAt[h] - strAt[h * MAXO + o];
+    if (enemyStr > 0) {
+      engaged[i] = 1;
+      s.energy[i] -= enemyStr * COMBAT_RATE * dt;
     }
+  }
+
+  // Deaths + COMBAT/ORBIT tint, after ALL damage (kept order-independent / deterministic).
+  // Don't kill mid-scan — compaction below swap-removes the DEAD in a safe descending pass.
+  for (let i = 0; i < s.count; i++) {
+    if (s.energy[i] <= 0) s.state[i] = STATE.DEAD;
+    else if (s.state[i] !== STATE.TRANSIT)
+      s.state[i] = engaged[i] ? STATE.COMBAT : STATE.ORBIT;
   }
 
   // Compaction: single descending loop so swap-remove (last -> i) never moves an

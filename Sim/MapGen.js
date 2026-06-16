@@ -15,9 +15,9 @@ export const STAT_MIN = 20;
 const stat = (rng) => STAT_MIN + Math.round(rng() * (100 - STAT_MIN));
 
 // Planets: rarer, much larger bodies with richer stats and faster energy. Two looks.
-const PLANET_CHANCE = 0.28;
-const PLANET_MIN_R = 56;
-const PLANET_MAX_R = 92;
+const PLANET_CHANCE = 0.45;
+const PLANET_MIN_R = 112; // ~2x asteroids; planets dominate their neighborhood
+const PLANET_MAX_R = 184;
 const PLANET_STAT_MIN = 55; // planets roll in a higher band than asteroids
 const PLANET_ENERGY_MULT = 2.5; // planets generate energy this much faster
 const planetStat = (rng) =>

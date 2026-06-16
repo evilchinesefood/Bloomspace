@@ -96,6 +96,7 @@ export function createGame(canvas, config = {}) {
       emitFlowerPuffs();
     }
 
+    scene.driftStars(dt);
     asteroids.update();
     seedlings.update(alpha);
     trees.update();

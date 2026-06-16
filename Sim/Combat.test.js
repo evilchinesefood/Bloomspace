@@ -4,11 +4,6 @@ import { createWorld, spawnSeedling, STATE, OWNER_NEUTRAL } from "./World.js";
 import { resolveCombat, CONTACT_RADIUS, HOLD_GAP } from "./Combat.js";
 import Sim from "./World.js";
 
-const PLAYERS = [
-  { id: 0, isAi: false, difficulty: 0 },
-  { id: 1, isAi: true, difficulty: 1 },
-];
-
 // Build a minimal world with ONE asteroid at a known spot and no auto-seeded orbiters
 // of interest. We place our own seedlings by directly poking the SoA (via spawnSeedling
 // then overwriting x/y) so positions are fully controlled for combat tests.
@@ -51,9 +46,11 @@ test("grid: enemies within CONTACT_RADIUS trade damage; far ones don't", () => {
   const w = bareWorld();
   // wipe the auto-seeded orbiters so they don't interfere
   w.seed.count = 0;
-  const a = put(w, 0, 0, 0, 50, 100);
-  const near = put(w, CONTACT_RADIUS - 1, 0, 1, 50, 100);
-  const far = put(w, 500, 0, 1, 50, 100);
+  // home -1 = not orbiting a rock, so this isolates PROXIMITY combat (the same-home rule
+  // would otherwise make co-homed enemies fight regardless of distance).
+  const a = put(w, 0, 0, 0, 50, 100, -1);
+  const near = put(w, CONTACT_RADIUS - 1, 0, 1, 50, 100, -1);
+  const far = put(w, 500, 0, 1, 50, 100, -1);
   const e0 = w.seed.energy[a];
   const eNear = w.seed.energy[near];
   const eFar = w.seed.energy[far];
@@ -69,6 +66,21 @@ test("grid: enemies within CONTACT_RADIUS trade damage; far ones don't", () => {
   }
   assert.ok(farUntouched, "far enemy should be untouched");
   void eNear;
+});
+
+test("same-rock enemies fight even far apart (no peaceful co-occupation)", () => {
+  const w = bareWorld();
+  w.seed.count = 0;
+  // two enemies sharing home 0, placed FAR apart (way beyond CONTACT_RADIUS)
+  const a = put(w, 0, 0, 0, 50, 100, 0);
+  const e0 = w.seed.energy[a];
+  const e1 = w.seed.energy[put(w, 600, 0, 1, 50, 100, 0)];
+  resolveCombat(w, 1 / 30);
+  assert.ok(w.seed.energy[0] < e0, "co-homed enemy a takes damage");
+  let bDmg = false;
+  for (let i = 0; i < w.seed.count; i++)
+    if (w.seed.owner[i] === 1) bDmg = w.seed.energy[i] < e1;
+  assert.ok(bDmg, "co-homed enemy b takes damage despite the distance");
 });
 
 test("no friendly fire: same-owner neighbors never lose energy", () => {

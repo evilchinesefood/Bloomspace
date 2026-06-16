@@ -208,9 +208,9 @@ export function createAsteroidView(scene, world, camCtl) {
       new THREE.Float32BufferAttribute(edgePts, 3),
     ),
     new THREE.LineBasicMaterial({
-      color: 0x2b3a5c,
+      color: 0x5878b4,
       transparent: true,
-      opacity: 0.4,
+      opacity: 0.7,
     }),
   );
   net.frustumCulled = false;

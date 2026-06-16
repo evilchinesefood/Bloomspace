@@ -140,7 +140,7 @@ test("higher difficulty takes more actions / expands over the same window", () =
   // sends fighting), so actions is the primary assertion and expansion is a soft check.
   const make = (dif) =>
     createWorld({
-      seed: 13,
+      seed: 7,
       asteroidCount: 14,
       players: [
         { id: 0, isAi: false, difficulty: 0 },
