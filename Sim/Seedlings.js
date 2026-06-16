@@ -2,6 +2,7 @@
 // colonization. NO three.js. Combat (COMBAT/DEAD) is deferred to T4.
 import { STATE, OWNER_NEUTRAL } from "./World.js";
 
+const TAU = Math.PI * 2;
 const ORBIT_BASE = 1.2; // base angular speed (rad/sec)
 const TRANSIT_BASE = 120; // base linear speed (world units/sec)
 const ARRIVE_GAP = 24; // orbit gap added to target.radius for "arrived"
@@ -16,7 +17,9 @@ export function updateSeedlings(world, dt) {
     if (st === STATE.ORBIT) {
       const a = world.asteroids[s.home[i]];
       if (!a) continue;
-      s.orbitAngle[i] += dt * ORBIT_BASE * speedFactor(a);
+      let ang = s.orbitAngle[i] + dt * ORBIT_BASE * speedFactor(a);
+      if (ang >= TAU) ang -= TAU;
+      s.orbitAngle[i] = ang;
       s.x[i] = a.x + Math.cos(s.orbitAngle[i]) * s.orbitRadius[i];
       s.y[i] = a.y + Math.sin(s.orbitAngle[i]) * s.orbitRadius[i];
     } else if (st === STATE.TRANSIT) {
