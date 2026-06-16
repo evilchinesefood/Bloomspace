@@ -74,8 +74,9 @@ function resolveArrival(world, i, target) {
     // Reinforce: just join the orbit.
     joinOrbit(world, i, target);
   } else {
-    // Enemy-held: park into contact, keep alive, leave ownership unchanged.
-    // T4: enemy arrival → combat
+    // Enemy-held: park into the shared orbit and let T4 combat resolve it. Damage is
+    // applied on contact by Combat.resolveCombat; ownership only flips once the defenders
+    // are gone (Combat.flipOwnership), never here. Attackers that lose the fight die.
     joinOrbit(world, i, target);
   }
 }

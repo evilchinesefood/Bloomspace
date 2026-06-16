@@ -133,19 +133,36 @@ test("sending to OWN asteroid re-homes without ownership change", () => {
   assert.equal(neutral.owner, 0); // still owner 0, no flip
 });
 
-test("sending to ENEMY asteroid does NOT flip ownership", () => {
+test("enemy arrival is governed by combat, not instant colonization", () => {
+  // Unlike a neutral rock (instant colonize on arrival), an enemy-held rock is NOT
+  // captured on mere contact: combat must wipe the defenders first (Combat.flipOwnership).
+  // This is robust to who ultimately wins — it only checks the arrival moment + that the
+  // fight actually produces casualties (combat is wired into step()).
   const w = mk();
   const home0 = w.asteroids.find((a) => a.owner === 0);
   const home1 = w.asteroids.find((a) => a.owner === 1);
+  const startCount = w.seed.count;
   const sent = sendSeedlings(w, home0.id, home1.id, 1, 0);
   assert.ok(sent >= 1);
-  // step well past arrival
+  // Step until the first attacker actually reaches and re-homes at the enemy rock.
+  // resolveArrival runs in updateSeedlings *before* resolveCombat in the same tick, so the
+  // arriving attacker is always observed alive here regardless of stats.
+  const arrived = stepUntil(
+    w,
+    () => {
+      for (let i = 0; i < w.seed.count; i++)
+        if (w.seed.owner[i] === 0 && w.seed.home[i] === home1.id) return true;
+      return false;
+    },
+    1500,
+  );
+  assert.notEqual(arrived, -1, "attacker never reached enemy rock");
+  assert.equal(
+    home1.owner,
+    1,
+    "enemy rock colonized on mere contact (should require combat)",
+  );
+  // Combat is actually engaged: the fight kills seedlings over time.
   for (let i = 0; i < 1500; i++) Sim.step(w, 1 / 30);
-  assert.equal(home1.owner, 1, "enemy rock ownership wrongly flipped");
-  // the sent seedlings are alive (not DEAD) and now homed at the enemy rock
-  let parked = 0;
-  for (let i = 0; i < w.seed.count; i++) {
-    if (w.seed.owner[i] === 0 && w.seed.home[i] === home1.id) parked++;
-  }
-  assert.ok(parked >= 1, "attacker seedlings not parked at enemy rock");
+  assert.ok(w.seed.count < startCount, "combat never resolved (no casualties)");
 });

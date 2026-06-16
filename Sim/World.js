@@ -2,6 +2,7 @@
 // Declares the SoA shape from the plan; orchestrates the per-tick sim.
 import { generateMap } from "./MapGen.js";
 import { updateSeedlings } from "./Seedlings.js";
+import { resolveCombat } from "./Combat.js";
 
 // Owners:        -1 neutral, 0 human, 1..N AI
 // Seedling state: 0 ORBIT, 1 TRANSIT, 2 COMBAT, 3 DEAD
@@ -120,6 +121,7 @@ export function step(world, dt) {
   s.px.set(s.x.subarray(0, s.count));
   s.py.set(s.y.subarray(0, s.count));
   updateSeedlings(world, dt);
+  resolveCombat(world, dt);
   world.tick++;
 }
 
