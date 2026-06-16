@@ -12,8 +12,11 @@ export function updateEconomy(world, dt) {
   for (let a = 0; a < asts.length; a++) {
     const rock = asts[a];
     if (rock.owner === OWNER_NEUTRAL) continue;
-    let e = rock.energy + ENERGY_RATE * (rock.energyStat / 100) * dt;
-    if (e > ENERGY_MAX) e = ENERGY_MAX;
+    // Planets regenerate (and store) energy faster via energyMult.
+    const mult = rock.energyMult || 1;
+    let e = rock.energy + ENERGY_RATE * (rock.energyStat / 100) * mult * dt;
+    const cap = ENERGY_MAX * mult;
+    if (e > cap) e = cap;
     if (e < 0) e = 0;
     rock.energy = e;
   }

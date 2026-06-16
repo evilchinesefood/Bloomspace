@@ -19,7 +19,7 @@ const BLOOM_SCALE = 0.5;
 // stay solid. A non-zero threshold is what keeps asteroids from blooming into "suns".
 const BLOOM_STRENGTH = 0.55;
 const BLOOM_RADIUS = 0.4;
-const BLOOM_THRESHOLD = 0.45;
+const BLOOM_THRESHOLD = 0.55;
 
 const MIN_ZOOM = 0.82; // allow pulling back a little past fit-all to see the whole map
 const MAX_ZOOM = 8; // sane close-in limit

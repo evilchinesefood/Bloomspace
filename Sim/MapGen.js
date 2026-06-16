@@ -14,6 +14,15 @@ const HOME_ENERGY = 100; // starting stored energy on a home rock
 export const STAT_MIN = 20;
 const stat = (rng) => STAT_MIN + Math.round(rng() * (100 - STAT_MIN));
 
+// Planets: rarer, much larger bodies with richer stats and faster energy. Two looks.
+const PLANET_CHANCE = 0.28;
+const PLANET_MIN_R = 56;
+const PLANET_MAX_R = 92;
+const PLANET_STAT_MIN = 55; // planets roll in a higher band than asteroids
+const PLANET_ENERGY_MULT = 2.5; // planets generate energy this much faster
+const planetStat = (rng) =>
+  PLANET_STAT_MIN + Math.round(rng() * (100 - PLANET_STAT_MIN));
+
 function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
@@ -27,7 +36,10 @@ function placeAsteroids(world, count) {
   const maxAttempts = count * 200;
   while (out.length < count && attempts < maxAttempts) {
     attempts++;
-    const radius = MIN_RADIUS + rng() * (MAX_RADIUS - MIN_RADIUS);
+    const isPlanet = rng() < PLANET_CHANCE;
+    const radius = isPlanet
+      ? PLANET_MIN_R + rng() * (PLANET_MAX_R - PLANET_MIN_R)
+      : MIN_RADIUS + rng() * (MAX_RADIUS - MIN_RADIUS);
     const x = EDGE_PAD + radius + rng() * (width - 2 * (EDGE_PAD + radius));
     const y = EDGE_PAD + radius + rng() * (height - 2 * (EDGE_PAD + radius));
     const cand = { x, y, radius };
@@ -39,18 +51,22 @@ function placeAsteroids(world, count) {
       }
     }
     if (!ok) continue;
+    const sfn = isPlanet ? planetStat : stat;
     out.push({
       id: id++,
       x,
       y,
       radius,
-      energyStat: stat(rng),
-      strengthStat: stat(rng),
-      speedStat: stat(rng),
+      energyStat: sfn(rng),
+      strengthStat: sfn(rng),
+      speedStat: sfn(rng),
       owner: OWNER_NEUTRAL,
       energy: 0,
       trees: [],
       rally: -1, // anchor point: -1 none, else target asteroid id for new production
+      kind: isPlanet ? "planet" : "asteroid",
+      ptype: isPlanet ? (rng() < 0.5 ? "gas" : "terran") : null,
+      energyMult: isPlanet ? PLANET_ENERGY_MULT : 1,
     });
   }
   return out;

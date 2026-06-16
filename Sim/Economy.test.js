@@ -25,6 +25,7 @@ function neutralRock(w) {
 test("owned asteroid energy rises over time and caps at ENERGY_MAX", () => {
   const w = world();
   const rock = ownedRock(w);
+  rock.energyMult = 1; // test plain-asteroid cap (planets store energyMult× more)
   rock.energyStat = 100;
   rock.energy = 0;
   const e0 = rock.energy;

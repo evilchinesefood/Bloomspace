@@ -1,59 +1,59 @@
-// Render/SeedlingView.js — instanced seedlings drawn straight from the SoA arrays,
-// interpolated between sim ticks. Tinted by owner (shared palette); COMBAT seedlings
-// run hotter. Teleport guard: when a seedling re-homes/colonizes the sim snaps it far in
-// one tick — lerping would streak, so we draw at x/y when dist(px..x) is large.
-//
-// Perf (T8): viewport culling + LOD. We only push instances whose interpolated world
-// position is inside the camera frustum + margin, packed into low indices, and set
-// mesh.count to that visible total. When seedlings would be sub-pixel (apparent-size LOD)
-// we draw NO individual seedlings (mesh.count = 0) — AsteroidView shows aggregate glow.
-// A render-only cap (setCap) hard-limits drawn instances for low-end devices.
+// Render/SeedlingView.js — seedlings drawn as Font Awesome ship sprites: fighters
+// (jet-fighter-up) and defenders (shuttle-space), tinted by owner and oriented along their
+// heading. Two instanced meshes (one texture each) are filled from the SoA each frame with
+// viewport culling, apparent-size LOD (collapse to AsteroidView's aggregate glow when ships
+// would be sub-pixel), a render-only cap, and a teleport snap on re-home.
 import * as THREE from "three";
 import { STATE } from "../Sim/World.js";
 import { ownerColor } from "./Palette.js";
+import { glyphTexture, ICON } from "./Glyphs.js";
 
 const lerp = (a, b, t) => a + (b - a) * t;
-// A few asteroid radii — re-homes jump much farther than one tick of normal motion.
+const SHIP = 13; // ship sprite size (world units)
 const SNAP_THRESHOLD = 140;
 const SNAP_SQ = SNAP_THRESHOLD * SNAP_THRESHOLD;
-const COMBAT_TINT = 0xff7a3c; // hotter color for fighting seedlings
-const CULL_MARGIN = 40; // world units of slack around the frustum
-const SEED_RADIUS = 6; // matches the CircleGeometry radius below
-// When a seedling would draw smaller than this many screen px (diameter), collapse the
-// whole field into AsteroidView's per-rock aggregate glow instead of drawing each one.
+const COMBAT_TINT = 0xff7a3c; // fighting ships run hot
+const CULL_MARGIN = 40;
+const SEED_RADIUS = 6; // apparent-size reference for LOD
 const MIN_SEED_PX = 3;
+const HALF_PI = Math.PI / 2;
 
-// LOD keyed on APPARENT on-screen size, not the zoom factor — so the default fit-all view
-// shows seedlings on every map size, and the aggregate only kicks in when they'd be
-// sub-pixel specks (huge maps / very zoomed out). Shared with AsteroidView.
+// LOD keyed on apparent on-screen size (shared with AsteroidView).
 export function lodActive(camCtl) {
   if (!camCtl || !camCtl.getWorldPerPixel) return false;
   const wpp = camCtl.getWorldPerPixel();
   return wpp > 0 && (SEED_RADIUS * 2) / wpp < MIN_SEED_PX;
 }
 
-// camCtl is the scene controller from createScene (getZoom + camera frustum). Optional so
-// the view still constructs in a bare-scene test, falling back to "draw everything".
-export function createSeedlingView(scene, world, camCtl) {
-  const capacity = world.seed.capacity;
-  const geo = new THREE.CircleGeometry(6, 12);
-  const mat = new THREE.MeshBasicMaterial({ vertexColors: false });
-  const mesh = new THREE.InstancedMesh(geo, mat, capacity);
+function makeShipMesh(scene, capacity, code) {
+  const mat = new THREE.MeshBasicMaterial({
+    map: glyphTexture(code),
+    transparent: true,
+    depthWrite: false,
+  });
+  const mesh = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(SHIP, SHIP),
+    mat,
+    capacity,
+  );
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   mesh.instanceColor = new THREE.InstancedBufferAttribute(
     new Float32Array(capacity * 3),
     3,
   );
-  mesh.count = 0;
-  // We pack visible instances into low indices, so frustum culling on the mesh AABB would
-  // be wrong (the AABB no longer reflects all instances). Cull per-instance ourselves.
   mesh.frustumCulled = false;
+  mesh.count = 0;
   scene.add(mesh);
+  return mesh;
+}
 
+export function createSeedlingView(scene, world, camCtl) {
+  const capacity = world.seed.capacity;
+  const fighters = makeShipMesh(scene, capacity, ICON.fighter);
+  const defenders = makeShipMesh(scene, capacity, ICON.defender);
   const dummy = new THREE.Object3D();
   const col = new THREE.Color();
 
-  // Render-only seedling cap (escape hatch). Infinity = draw all visible.
   let cap = Infinity;
   function setCap(n) {
     cap = n == null || n <= 0 ? Infinity : n;
@@ -61,15 +61,11 @@ export function createSeedlingView(scene, world, camCtl) {
 
   function update(alpha) {
     const s = world.seed;
-
-    // LOD far tier: when seedlings would be sub-pixel, skip them; AsteroidView aggregates.
     if (lodActive(camCtl)) {
-      mesh.count = 0;
+      fighters.count = 0;
+      defenders.count = 0;
       return;
     }
-
-    // Frustum bounds in WORLD space. The ortho frustum (left/right/top/bottom) is relative
-    // to the camera, so add the camera position to get world coordinates.
     let minX = -Infinity,
       maxX = Infinity,
       minY = -Infinity,
@@ -81,37 +77,50 @@ export function createSeedlingView(scene, world, camCtl) {
       minY = c.position.y + c.bottom - CULL_MARGIN;
       maxY = c.position.y + c.top + CULL_MARGIN;
     }
-
-    let vis = 0;
+    let vf = 0,
+      vd = 0,
+      total = 0;
     for (let i = 0; i < s.count; i++) {
-      if (vis >= cap) break;
-      const dx = s.x[i] - s.px[i];
-      const dy = s.y[i] - s.py[i];
+      if (total >= cap) break;
+      const ddx = s.x[i] - s.px[i];
+      const ddy = s.y[i] - s.py[i];
+      const teleport = ddx * ddx + ddy * ddy > SNAP_SQ;
       let x, y;
-      if (dx * dx + dy * dy > SNAP_SQ) {
-        // Teleport this tick (re-home/colonize) — snap, don't streak.
+      if (teleport) {
         x = s.x[i];
         y = s.y[i];
       } else {
         x = lerp(s.px[i], s.x[i], alpha);
         y = lerp(s.py[i], s.y[i], alpha);
       }
-      // Cull off-screen seedlings.
       if (x < minX || x > maxX || y < minY || y > maxY) continue;
-
+      // Orient along motion (orbit tangent or transit heading); idle ships point up.
+      let rot = 0;
+      if (!teleport && ddx * ddx + ddy * ddy > 0.0004)
+        rot = Math.atan2(ddy, ddx) - HALF_PI;
       dummy.position.set(x, y, 0);
+      dummy.rotation.set(0, 0, rot);
       dummy.updateMatrix();
-      mesh.setMatrixAt(vis, dummy.matrix);
-
       if (s.state[i] === STATE.COMBAT) col.setHex(COMBAT_TINT);
       else ownerColor(col, s.owner[i]);
-      mesh.setColorAt(vis, col);
-      vis++;
+      if (s.kind[i] === 1) {
+        defenders.setMatrixAt(vd, dummy.matrix);
+        defenders.setColorAt(vd, col);
+        vd++;
+      } else {
+        fighters.setMatrixAt(vf, dummy.matrix);
+        fighters.setColorAt(vf, col);
+        vf++;
+      }
+      total++;
     }
-    mesh.count = vis;
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    fighters.count = vf;
+    defenders.count = vd;
+    fighters.instanceMatrix.needsUpdate = true;
+    defenders.instanceMatrix.needsUpdate = true;
+    if (fighters.instanceColor) fighters.instanceColor.needsUpdate = true;
+    if (defenders.instanceColor) defenders.instanceColor.needsUpdate = true;
   }
 
-  return { mesh, update, setCap };
+  return { fighters, defenders, update, setCap };
 }

@@ -45,6 +45,7 @@ function makeSeedArrays(capacity) {
     orbitAngle: new Float32Array(capacity),
     orbitRadius: new Float32Array(capacity),
     state: new Uint8Array(capacity),
+    kind: new Uint8Array(capacity), // 0 fighter, 1 defender (defense-tree spawned)
   };
 }
 
@@ -86,6 +87,7 @@ export function spawnSeedling(world, opts = {}) {
   s.strength[i] = opts.strength ?? 50;
   s.energy[i] = opts.energy ?? 10;
   s.state[i] = STATE.ORBIT;
+  s.kind[i] = opts.kind ?? 0;
   const cx = a ? a.x : 0;
   const cy = a ? a.y : 0;
   s.x[i] = cx + Math.cos(s.orbitAngle[i]) * s.orbitRadius[i];
@@ -118,6 +120,7 @@ export function killSeedling(world, i) {
       "orbitAngle",
       "orbitRadius",
       "state",
+      "kind",
     ]) {
       s[k][i] = s[k][last];
     }

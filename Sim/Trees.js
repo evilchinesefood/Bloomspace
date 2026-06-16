@@ -60,7 +60,7 @@ export function plantTree(world, asteroidId, type, owner) {
   return true;
 }
 
-function spawnOrbiter(world, rock) {
+function spawnOrbiter(world, rock, kind = 0) {
   return spawnSeedling(world, {
     home: rock.id,
     owner: rock.owner,
@@ -68,6 +68,7 @@ function spawnOrbiter(world, rock) {
     energy: rock.energyStat,
     orbitRadius: rock.radius + 30 + world.rng() * 20,
     orbitAngle: world.rng() * Math.PI * 2,
+    kind,
   });
 }
 
@@ -92,7 +93,7 @@ export function updateTrees(world, dt) {
             orbitersAt(world, rock.id, rock.owner) < DEFENDERS_MAX &&
             spendEnergy(rock, DEFENDER_ENERGY_COST)
           ) {
-            spawnOrbiter(world, rock);
+            spawnOrbiter(world, rock, 1); // defender
           }
         }
         continue;
