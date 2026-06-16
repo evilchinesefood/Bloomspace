@@ -68,17 +68,18 @@ export function createSeedlingView(scene, world, camCtl) {
       return;
     }
 
-    // Frustum bounds in world space (ortho camera: left/right/bottom/top are world units).
+    // Frustum bounds in WORLD space. The ortho frustum (left/right/top/bottom) is relative
+    // to the camera, so add the camera position to get world coordinates.
     let minX = -Infinity,
       maxX = Infinity,
       minY = -Infinity,
       maxY = Infinity;
     if (camCtl) {
       const c = camCtl.camera;
-      minX = c.left - CULL_MARGIN;
-      maxX = c.right + CULL_MARGIN;
-      minY = c.bottom - CULL_MARGIN;
-      maxY = c.top + CULL_MARGIN;
+      minX = c.position.x + c.left - CULL_MARGIN;
+      maxX = c.position.x + c.right + CULL_MARGIN;
+      minY = c.position.y + c.bottom - CULL_MARGIN;
+      maxY = c.position.y + c.top + CULL_MARGIN;
     }
 
     let vis = 0;

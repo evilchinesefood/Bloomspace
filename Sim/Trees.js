@@ -8,6 +8,7 @@
 // T4 combat layer makes them auto-attack intruders by proximity.
 import { spawnSeedling, OWNER_NEUTRAL } from "./World.js";
 import { spendEnergy } from "./Economy.js";
+import { launchSeedling } from "./Seedlings.js";
 
 export const TREE_SEED_COST = 5; // player seeds to plant any tree
 export const TREE_ENERGY_COST = 30; // asteroid energy to plant any tree
@@ -60,7 +61,7 @@ export function plantTree(world, asteroidId, type, owner) {
 }
 
 function spawnOrbiter(world, rock) {
-  spawnSeedling(world, {
+  return spawnSeedling(world, {
     home: rock.id,
     owner: rock.owner,
     strength: rock.strengthStat,
@@ -102,7 +103,11 @@ export function updateTrees(world, dt) {
         tree.cooldown = PRODUCE_INTERVAL;
         if (rock.energy >= SEEDLING_ENERGY_COST) {
           spendEnergy(rock, SEEDLING_ENERGY_COST);
-          spawnOrbiter(world, rock);
+          const i = spawnOrbiter(world, rock);
+          // Rally: route freshly-produced seedlings to the rock's anchor point.
+          const tgt = rock.rally >= 0 ? world.asteroids[rock.rally] : null;
+          if (i >= 0 && tgt && tgt.id !== rock.id)
+            launchSeedling(world, i, tgt);
         }
       }
       tree.flowerCd -= dt;

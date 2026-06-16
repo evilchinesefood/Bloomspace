@@ -81,6 +81,31 @@ function resolveArrival(world, i, target) {
   }
 }
 
+// launchSeedling — put one seedling into TRANSIT toward a target asteroid. Shared by player
+// sends and tree-production rally routing.
+export function launchSeedling(world, i, target) {
+  const s = world.seed;
+  s.target[i] = target.id;
+  s.state[i] = STATE.TRANSIT;
+  const dx = target.x - s.x[i];
+  const dy = target.y - s.y[i];
+  const d = Math.hypot(dx, dy) || 1;
+  const home = world.asteroids[s.home[i]];
+  const speed = TRANSIT_BASE * speedFactor(home || target);
+  s.vx[i] = (dx / d) * speed;
+  s.vy[i] = (dy / d) * speed;
+}
+
+// setRally — set or clear an asteroid's rally (anchor) point. Seedlings newly produced by a
+// seedling tree on this rock auto-move to the rally. Clears when target is the rock itself
+// or invalid. Only the rock's owner may set it.
+export function setRally(world, fromId, toId, owner) {
+  const rock = world.asteroids[fromId];
+  if (!rock || rock.owner !== owner) return false;
+  rock.rally = toId === fromId || !world.asteroids[toId] ? -1 : toId;
+  return true;
+}
+
 // sendSeedlings — dispatch floor(eligible * fraction) ORBITing seedlings of `owner`
 // from `fromId` toward `toId`. Returns count sent. Safe no-op on bad args.
 // Note: if fraction>0 and eligible>=1 but floor(eligible*fraction)===0, sends 0.
@@ -103,18 +128,7 @@ export function sendSeedlings(world, fromId, toId, fraction, owner) {
     }
   }
   const n = Math.floor(eligible.length * f);
-  for (let k = 0; k < n; k++) {
-    const i = eligible[k];
-    s.target[i] = toId;
-    s.state[i] = STATE.TRANSIT;
-    const dx = target.x - s.x[i];
-    const dy = target.y - s.y[i];
-    const d = Math.hypot(dx, dy) || 1;
-    const home = world.asteroids[fromId];
-    const speed = TRANSIT_BASE * speedFactor(home || target);
-    s.vx[i] = (dx / d) * speed;
-    s.vy[i] = (dy / d) * speed;
-  }
+  for (let k = 0; k < n; k++) launchSeedling(world, eligible[k], target);
   return n;
 }
 

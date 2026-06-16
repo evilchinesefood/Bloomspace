@@ -5,7 +5,7 @@
 //   - drag the selected owned rock toward another rock: drives the in-world drag line.
 //   - release over a target rock: sendSeedlings(from, target, fraction, 0) + send FX.
 // All select highlight + drag indicator visuals come from Render (already built).
-import { sendSeedlings } from "../Sim/Seedlings.js";
+import { sendSeedlings, setRally } from "../Sim/Seedlings.js";
 import { plantTree } from "../Sim/Trees.js";
 import { ownerColorHex } from "../Render/Palette.js";
 
@@ -24,9 +24,16 @@ export function createInput({
   let downY = 0;
   let dragging = false; // armed drag from an owned rock
   let pointerId = null;
+  let rallyMode = false; // armed: next click sets the selected rock's rally point
 
   function selectedId() {
     return views.asteroids.selected();
+  }
+  function setRallyMode(on) {
+    rallyMode = !!on;
+  }
+  function isRallyMode() {
+    return rallyMode;
   }
 
   function select(id) {
@@ -43,12 +50,28 @@ export function createInput({
     if (e.button !== 0) return;
     const world = getWorld();
     if (!world || world.status !== "playing") return;
+    const clicked = picking.asteroidAt(e.clientX, e.clientY, world);
+
+    // Rally-set mode: a single click on a target sets the selected rock's anchor (clicking
+    // the selected rock itself, or empty space, clears it). Doesn't select or arm a drag.
+    if (rallyMode) {
+      const src = selectedId();
+      if (
+        src >= 0 &&
+        world.asteroids[src] &&
+        world.asteroids[src].owner === HUMAN
+      )
+        setRally(world, src, clicked, HUMAN);
+      rallyMode = false;
+      return;
+    }
+
     pointerId = e.pointerId;
     canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
     downX = e.clientX;
     downY = e.clientY;
     dragging = false;
-    downId = picking.asteroidAt(e.clientX, e.clientY, world);
+    downId = clicked;
 
     if (downId < 0) {
       // Empty space — deselect.
@@ -134,5 +157,5 @@ export function createInput({
     picking.endDrag();
   }
 
-  return { plant, selectedId, destroy };
+  return { plant, selectedId, setRallyMode, isRallyMode, destroy };
 }

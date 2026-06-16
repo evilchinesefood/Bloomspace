@@ -260,6 +260,17 @@ export function createHud(root, api) {
   plantSeedBtn.addEventListener("click", () => api.onPlant("seedling"));
   plantDefBtn.addEventListener("click", () => api.onPlant("defense"));
 
+  // Rally (anchor) point: arms a one-click target pick; new seedlings produced here then
+  // auto-move to that target. Clicking this rock itself (while arming) clears the rally.
+  const rallyBtn = el("wa-button", {
+    size: "small",
+    style: "width:100%;margin-top:.4rem;",
+    html: '<i slot="start" class="fa-solid fa-location-crosshairs"></i>Set Rally Point',
+  });
+  rallyBtn.addEventListener("click", () =>
+    api.setRallyMode(!api.isRallyMode()),
+  );
+
   const hint = el("div", {
     style: "margin-top:.6rem;font:500 .76rem system-ui;opacity:.6;",
     textContent: "Drag from this asteroid to a target to send seedlings.",
@@ -276,6 +287,7 @@ export function createHud(root, api) {
     sendSlider,
     plantSeedBtn,
     plantDefBtn,
+    rallyBtn,
     hint,
   );
 
@@ -305,10 +317,11 @@ export function createHud(root, api) {
         : `Trees: ${seedT} seedling, ${defT} defense`;
 
     const owned = a.owner === HUMAN;
-    // Only your own rocks expose send/plant; others are info-only.
+    // Only your own rocks expose send/plant/rally; others are info-only.
     sendSlider.style.display = owned ? "" : "none";
     plantSeedBtn.style.display = owned ? "" : "none";
     plantDefBtn.style.display = owned ? "" : "none";
+    rallyBtn.style.display = owned ? "" : "none";
     hint.style.display = owned ? "" : "none";
     if (owned) {
       const seeds = playerSeeds(world, HUMAN);
@@ -321,6 +334,18 @@ export function createHud(root, api) {
         : `Need ${TREE_SEED_COST} seeds + ${TREE_ENERGY_COST} energy`;
       plantSeedBtn.title = why;
       plantDefBtn.title = why;
+
+      const arming = api.isRallyMode();
+      rallyBtn.variant = arming ? "brand" : "neutral";
+      const rallySet = a.rally != null && a.rally >= 0;
+      rallyBtn.innerHTML = arming
+        ? '<i slot="start" class="fa-solid fa-xmark"></i>Cancel rally pick'
+        : rallySet
+          ? `<i slot="start" class="fa-solid fa-location-crosshairs"></i>Rally → #${a.rally} (change)`
+          : '<i slot="start" class="fa-solid fa-location-crosshairs"></i>Set Rally Point';
+      hint.textContent = arming
+        ? "Click a target asteroid to set the rally (click this rock to clear)."
+        : "Drag from this asteroid to a target to send seedlings.";
     }
   }
 

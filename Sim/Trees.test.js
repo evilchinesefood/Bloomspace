@@ -9,6 +9,7 @@ import {
   TREE_ENERGY_COST,
   DEFENDERS_MAX,
 } from "./Trees.js";
+import { setRally } from "./Seedlings.js";
 
 const DT = 1 / 30;
 
@@ -190,4 +191,42 @@ test("createWorld normalizes player seeds to STARTING_SEEDS (additive)", () => {
     players: [{ id: 0, isAi: false, difficulty: 0, seeds: 99 }],
   });
   assert.equal(w2.players[0].seeds, 99);
+});
+
+// --- rally / anchor point ---------------------------------------------------
+
+test("setRally sets the anchor, clears on self/invalid, and respects ownership", () => {
+  const w = world();
+  const home = ownedRock(w);
+  const anchor = neutralRock(w);
+  assert.ok(setRally(w, home.id, anchor.id, 0));
+  assert.equal(home.rally, anchor.id);
+  assert.ok(setRally(w, home.id, home.id, 0)); // targeting self clears
+  assert.equal(home.rally, -1);
+  assert.equal(setRally(w, home.id, anchor.id, 1), false); // non-owner can't set
+});
+
+test("rally: seedling-tree production auto-routes new seedlings to the anchor", () => {
+  const w = world();
+  const home = ownedRock(w);
+  const anchor = neutralRock(w);
+  home.energy = 500;
+  w.players[0].seeds = 50;
+  assert.ok(plantTree(w, home.id, "seedling", 0));
+  assert.ok(setRally(w, home.id, anchor.id, 0));
+  let routed = false;
+  for (let i = 0; i < 4000 && !routed; i++) {
+    Sim.step(w, DT);
+    if (anchor.owner === 0)
+      routed = true; // a rallied seedling colonized the anchor
+    else {
+      const s = w.seed;
+      for (let k = 0; k < s.count; k++)
+        if (s.target[k] === anchor.id) {
+          routed = true;
+          break;
+        }
+    }
+  }
+  assert.ok(routed, "new production never routed to the rally anchor");
 });

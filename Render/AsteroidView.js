@@ -159,6 +159,32 @@ export function createAsteroidView(scene, world, camCtl) {
   scene.add(selRing);
   let selectedId = -1;
 
+  // --- Rally indicator: a line from the selected rock to its anchor + a target marker ---
+  const rallyGeo = new THREE.BufferGeometry();
+  rallyGeo.setAttribute(
+    "position",
+    new THREE.BufferAttribute(new Float32Array(6), 3),
+  );
+  const rallyLine = new THREE.Line(
+    rallyGeo,
+    new THREE.LineBasicMaterial({ transparent: true, opacity: 0.55 }),
+  );
+  rallyLine.visible = false;
+  rallyLine.position.z = -1;
+  rallyLine.frustumCulled = false;
+  scene.add(rallyLine);
+  const rallyFlag = new THREE.Mesh(
+    new THREE.RingGeometry(1, 1.22, 24),
+    new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide,
+    }),
+  );
+  rallyFlag.visible = false;
+  rallyFlag.position.z = -1;
+  scene.add(rallyFlag);
+
   function setSelected(id) {
     selectedId = id;
     const a = rocks[id];
@@ -195,6 +221,34 @@ export function createAsteroidView(scene, world, camCtl) {
       if (rims.instanceColor) rims.instanceColor.needsUpdate = true;
     }
     updateGlow();
+    updateRally();
+  }
+
+  // Show the selected rock's rally line + target marker (owner-colored). Hidden otherwise.
+  function updateRally() {
+    const rock = selectedId >= 0 ? rocks[selectedId] : null;
+    const tgt = rock && rock.rally >= 0 ? rocks[rock.rally] : null;
+    if (!rock || !tgt) {
+      rallyLine.visible = false;
+      rallyFlag.visible = false;
+      return;
+    }
+    const hex = ownerColorHex(rock.owner);
+    const p = rallyGeo.attributes.position.array;
+    p[0] = rock.x;
+    p[1] = rock.y;
+    p[2] = 0;
+    p[3] = tgt.x;
+    p[4] = tgt.y;
+    p[5] = 0;
+    rallyGeo.attributes.position.needsUpdate = true;
+    rallyLine.material.color.setHex(hex);
+    rallyLine.visible = true;
+    const fr = tgt.radius + 6;
+    rallyFlag.position.set(tgt.x, tgt.y, -1);
+    rallyFlag.scale.set(fr, fr, 1);
+    rallyFlag.material.color.setHex(hex);
+    rallyFlag.visible = true;
   }
 
   // LOD glow: only active (and only paying the per-seedling tally) when seedlings are

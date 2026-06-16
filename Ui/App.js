@@ -90,6 +90,8 @@ export function createApp(canvas, root) {
       setSendFraction: (f) => game && game.setSendFraction(f),
       onPlant: (type) => game && game.input.plant(type),
       getSelected: () => (game ? game.input.selectedId() : -1),
+      setRallyMode: (on) => game && game.input.setRallyMode(on),
+      isRallyMode: () => (game ? game.input.isRallyMode() : false),
       // Quality settings: read/write the session-persistent state + apply live.
       getQuality: () => quality,
       setBloom: (on) => {

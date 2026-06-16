@@ -50,6 +50,7 @@ function placeAsteroids(world, count) {
       owner: OWNER_NEUTRAL,
       energy: 0,
       trees: [],
+      rally: -1, // anchor point: -1 none, else target asteroid id for new production
     });
   }
   return out;
