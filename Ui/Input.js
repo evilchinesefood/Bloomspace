@@ -39,6 +39,8 @@ export function createInput({
   }
 
   function onDown(e) {
+    // Left button only — middle/right drive camera pan in Scene.js.
+    if (e.button !== 0) return;
     const world = getWorld();
     if (!world || world.status !== "playing") return;
     pointerId = e.pointerId;

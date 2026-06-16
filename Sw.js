@@ -1,12 +1,13 @@
 // Sw.js — service worker. Cache-first with network fallback.
 // IMPORTANT: bump CACHE_VERSION on EVERY deploy or clients keep stale assets.
-const CACHE_VERSION = "bloomspace-v2";
+const CACHE_VERSION = "bloomspace-v3";
 
 // App shell + heavy vendored deps. Web Awesome statically imports a graph of chunks from
 // its loader and also lazy-loads component chunks on demand; that recursive chunk graph is
 // cached at runtime by the fetch handler, not precached here. Full first-load-offline
-// support (precaching the whole WA chunk graph) is scheduled for T8's final SW cache pass.
-// All URLs are relative so they resolve correctly under a deploy subpath.
+// support (precaching the whole WA chunk graph) remains a runtime concern: the fetch
+// handler caches each WA chunk on first use. All first-party modules ARE precached below —
+// when you add a NEW Sim/Render/Ui module, add it here too. URLs stay relative for subpaths.
 const SHELL = [
   "./",
   "Index.html",

@@ -102,17 +102,54 @@ export function createHud(root, api) {
     settings.open = false;
     refreshSpeed();
   });
+  // --- Quality controls (T8): bloom on/off + render-only seedling cap. -------
+  const q = (api.getQuality && api.getQuality()) || {
+    bloom: true,
+    seedlingCap: 0,
+  };
+
+  // Bloom toggle — flips the UnrealBloomPass in/out of the composer (the escape hatch).
+  const bloomSwitch = el("wa-switch", {
+    style: "margin-bottom:.6rem;",
+    textContent: "Bloom glow",
+  });
+  if (q.bloom !== false) bloomSwitch.setAttribute("checked", "");
+  const onBloom = () => api.setBloom && api.setBloom(bloomSwitch.checked);
+  bloomSwitch.addEventListener("change", onBloom);
+  bloomSwitch.addEventListener("wa-change", onBloom);
+
+  // Seedling cap — RENDER-ONLY limit on drawn instances (not a sim change). 0 = uncapped.
+  const capOptions = [
+    ["0", "Uncapped"],
+    ["1500", "1500"],
+    ["800", "800"],
+    ["400", "400"],
+  ];
+  const capSelect = el("wa-select", {
+    label: "Max drawn seedlings",
+    size: "small",
+    style: "margin-bottom:.4rem;",
+    value: String(q.seedlingCap || 0),
+  });
+  for (const [val, label] of capOptions)
+    capSelect.append(el("wa-option", { value: val, textContent: label }));
+  const onCap = () =>
+    api.setSeedlingCap && api.setSeedlingCap(Number(capSelect.value) || 0);
+  capSelect.addEventListener("change", onCap);
+  capSelect.addEventListener("wa-change", onCap);
+
   settings.append(
-    el("div", { style: "min-width:160px;font:500 .85rem system-ui;" }, [
+    el("div", { style: "min-width:180px;font:500 .85rem system-ui;" }, [
       el("div", {
         style: "font-weight:700;margin-bottom:.5rem;",
         textContent: "Settings",
       }),
       resumeBtn,
-      // T8 seam: quality toggle lands here. Stub only; no perf logic in T7.
+      bloomSwitch,
+      capSelect,
       el("div", {
-        style: "opacity:.5;font-size:.8rem;",
-        textContent: "Quality toggle — coming soon",
+        style: "opacity:.55;font-size:.72rem;line-height:1.3;",
+        textContent: "Cap limits drawn seedlings only — the sim is unchanged.",
       }),
     ]),
   );

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createWorld, OWNER_NEUTRAL, STATE } from "./World.js";
+import { STAT_MIN } from "./MapGen.js";
 
 const TWO = [
   { id: 0, isAi: false, difficulty: 0 },
@@ -52,6 +53,8 @@ test("asteroid count and stat ranges", () => {
   for (const a of w.asteroids) {
     for (const s of [a.energyStat, a.strengthStat, a.speedStat]) {
       assert.ok(s >= 0 && s <= 100, `stat ${s} out of range`);
+      // Balance floor: no near-0 rock that dooms its seedlings on arrival.
+      assert.ok(s >= STAT_MIN && s <= 100, `stat ${s} below floor ${STAT_MIN}`);
     }
   }
 });

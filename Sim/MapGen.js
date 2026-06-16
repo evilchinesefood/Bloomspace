@@ -8,6 +8,11 @@ const MIN_GAP = 60; // min space between rock edges
 const EDGE_PAD = 30; // keep rocks off the map border
 const HOME_SEEDLINGS = 10; // starting orbiters per home rock
 const HOME_ENERGY = 100; // starting stored energy on a home rock
+// Floor for the three rock stats. A near-0 energyStat would make a rock's seedlings
+// dead-on-arrival in combat (they inherit energyStat as starting energy), so clamp the
+// usable range to ~STAT_MIN..100 without changing the number of rng() calls.
+export const STAT_MIN = 20;
+const stat = (rng) => STAT_MIN + Math.round(rng() * (100 - STAT_MIN));
 
 function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
@@ -39,9 +44,9 @@ function placeAsteroids(world, count) {
       x,
       y,
       radius,
-      energyStat: Math.round(rng() * 100),
-      strengthStat: Math.round(rng() * 100),
-      speedStat: Math.round(rng() * 100),
+      energyStat: stat(rng),
+      strengthStat: stat(rng),
+      speedStat: stat(rng),
       owner: OWNER_NEUTRAL,
       energy: 0,
       trees: [],

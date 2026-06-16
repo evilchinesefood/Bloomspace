@@ -1,5 +1,11 @@
 // Render/Scene.js — three.js setup: ortho top-down camera, EffectComposer with
-// RenderPass + UnrealBloomPass + OutputPass, resize handling. Owns no game truth.
+// RenderPass + UnrealBloomPass + OutputPass, resize handling, and interactive camera
+// control (wheel zoom-to-cursor + right/middle-button pan). Owns no game truth.
+//
+// Camera model: resize() computes a "fit-all" frustum (whole world centered, aspect
+// preserved). Zoom/pan are stored as a multiplier + world-space offset applied on top of
+// that base each frame via applyCamera(). Zoom 1 = fit-all; >1 zooms in. Picking reads the
+// live camera so unproject stays correct at any zoom/pan (matrices updated here).
 import * as THREE from "three";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
@@ -8,6 +14,15 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 
 // Bloom runs at half-resolution per the perf budget.
 const BLOOM_SCALE = 0.5;
+
+// Bloom tuning — pleasing glow without washing the scene out.
+const BLOOM_STRENGTH = 1.15;
+const BLOOM_RADIUS = 0.45;
+const BLOOM_THRESHOLD = 0.0;
+
+const MIN_ZOOM = 1; // fit-all (can't zoom further out than the whole world)
+const MAX_ZOOM = 8; // sane close-in limit
+const ZOOM_STEP = 1.0015; // per wheel-delta unit
 
 export function createScene(canvas, world) {
   const renderer = new THREE.WebGLRenderer({
@@ -31,12 +46,50 @@ export function createScene(canvas, world) {
 
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(1, 1),
-    1.3, // strength
-    0.4, // radius
-    0.0, // threshold (everything emissive blooms)
+    BLOOM_STRENGTH,
+    BLOOM_RADIUS,
+    BLOOM_THRESHOLD,
   );
   composer.addPass(bloom);
-  composer.addPass(new OutputPass());
+  const outputPass = new OutputPass();
+  composer.addPass(outputPass);
+
+  // --- Camera state: fit-all base frame + zoom/pan on top -------------------
+  // baseHalfW/H is the fit-all half-extent (zoom 1). centerX/Y is the pan target.
+  let baseHalfW = world.width / 2;
+  let baseHalfH = world.height / 2;
+  let zoom = 1;
+  let centerX = world.width / 2;
+  let centerY = world.height / 2;
+
+  function clampCenter() {
+    const halfW = baseHalfW / zoom;
+    const halfH = baseHalfH / zoom;
+    // Allow the world to drift a little past the edge but not vanish (half-margin).
+    const mx = Math.max(0, world.width / 2 - halfW) + halfW * 0.5;
+    const my = Math.max(0, world.height / 2 - halfH) + halfH * 0.5;
+    centerX = Math.min(
+      world.width / 2 + mx,
+      Math.max(world.width / 2 - mx, centerX),
+    );
+    centerY = Math.min(
+      world.height / 2 + my,
+      Math.max(world.height / 2 - my, centerY),
+    );
+  }
+
+  // Push zoom/pan into the camera frustum + matrices (Picking depends on this).
+  function applyCamera() {
+    clampCenter();
+    const halfW = baseHalfW / zoom;
+    const halfH = baseHalfH / zoom;
+    camera.left = centerX - halfW;
+    camera.right = centerX + halfW;
+    camera.top = centerY + halfH;
+    camera.bottom = centerY - halfH;
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+  }
 
   function resize() {
     const w = canvas.clientWidth || window.innerWidth;
@@ -50,25 +103,119 @@ export function createScene(canvas, world) {
     // Fit the world into the viewport, preserving aspect, centered.
     const worldAspect = world.width / world.height;
     const viewAspect = w / h;
-    let halfW, halfH;
     if (viewAspect >= worldAspect) {
-      halfH = world.height / 2;
-      halfW = halfH * viewAspect;
+      baseHalfH = world.height / 2;
+      baseHalfW = baseHalfH * viewAspect;
     } else {
-      halfW = world.width / 2;
-      halfH = halfW / viewAspect;
+      baseHalfW = world.width / 2;
+      baseHalfH = baseHalfW / viewAspect;
     }
-    const cx = world.width / 2;
-    const cy = world.height / 2;
-    camera.left = cx - halfW;
-    camera.right = cx + halfW;
-    camera.top = cy + halfH;
-    camera.bottom = cy - halfH;
-    camera.updateProjectionMatrix();
+    applyCamera();
+  }
+
+  // Reset to fit-all (called on a new match).
+  function resetCamera() {
+    zoom = 1;
+    centerX = world.width / 2;
+    centerY = world.height / 2;
+    applyCamera();
+  }
+
+  // Screen px → world (x,y) at the CURRENT camera, for zoom-to-cursor.
+  function screenToWorld(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const nx = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const ny = -((clientY - rect.top) / rect.height) * 2 + 1;
+    return {
+      x: centerX + (nx * baseHalfW) / zoom,
+      y: centerY + (ny * baseHalfH) / zoom,
+    };
+  }
+
+  // --- Wheel zoom toward the cursor -----------------------------------------
+  function onWheel(e) {
+    e.preventDefault();
+    const before = screenToWorld(e.clientX, e.clientY);
+    const next = zoom * Math.pow(ZOOM_STEP, -e.deltaY);
+    zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+    // Keep the world point under the cursor fixed: shift center by the delta.
+    const after = screenToWorld(e.clientX, e.clientY);
+    centerX += before.x - after.x;
+    centerY += before.y - after.y;
+    applyCamera();
+  }
+
+  // --- Right / middle-button drag pan (NOT left — that sends seedlings) ------
+  let panning = false;
+  let panPointer = null;
+  let lastPanX = 0;
+  let lastPanY = 0;
+
+  function onPointerDown(e) {
+    if (e.button !== 1 && e.button !== 2) return; // middle or right only
+    panning = true;
+    panPointer = e.pointerId;
+    lastPanX = e.clientX;
+    lastPanY = e.clientY;
+    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+  }
+  function onPointerMove(e) {
+    if (!panning || e.pointerId !== panPointer) return;
+    const rect = canvas.getBoundingClientRect();
+    // World units per screen pixel at the current zoom.
+    const wppX = (2 * baseHalfW) / zoom / rect.width;
+    const wppY = (2 * baseHalfH) / zoom / rect.height;
+    centerX -= (e.clientX - lastPanX) * wppX;
+    centerY += (e.clientY - lastPanY) * wppY; // screen-y is inverted vs world-y
+    lastPanX = e.clientX;
+    lastPanY = e.clientY;
+    applyCamera();
+  }
+  function endPan(e) {
+    if (e && panPointer !== null && e.pointerId !== panPointer) return;
+    panning = false;
+    panPointer = null;
+  }
+  function onContextMenu(e) {
+    e.preventDefault(); // right-drag pan shouldn't pop the browser menu
+  }
+
+  canvas.addEventListener("wheel", onWheel, { passive: false });
+  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointermove", onPointerMove);
+  canvas.addEventListener("pointerup", endPan);
+  canvas.addEventListener("pointercancel", endPan);
+  canvas.addEventListener("contextmenu", onContextMenu);
+
+  function disposeControls() {
+    canvas.removeEventListener("wheel", onWheel);
+    canvas.removeEventListener("pointerdown", onPointerDown);
+    canvas.removeEventListener("pointermove", onPointerMove);
+    canvas.removeEventListener("pointerup", endPan);
+    canvas.removeEventListener("pointercancel", endPan);
+    canvas.removeEventListener("contextmenu", onContextMenu);
+  }
+
+  // Toggle bloom in/out of the render path. OFF renders straight to screen.
+  function setBloomEnabled(on) {
+    bloom.enabled = !!on;
   }
 
   window.addEventListener("resize", resize);
   resize();
 
-  return { THREE, renderer, scene, camera, composer, bloom, resize };
+  return {
+    THREE,
+    renderer,
+    scene,
+    camera,
+    composer,
+    bloom,
+    resize,
+    resetCamera,
+    setBloomEnabled,
+    disposeControls,
+    // Live zoom factor (1 = fit-all, >1 = zoomed in) for LOD decisions.
+    getZoom: () => zoom,
+  };
 }

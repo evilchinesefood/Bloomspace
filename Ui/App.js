@@ -22,6 +22,14 @@ export function createApp(canvas, root) {
   let paused = false;
   let closeOverlay = null; // teardown for the current full-screen overlay
   let gameOverShown = false;
+  // Session-persistent quality settings (survive New Game; reapplied to each match).
+  const quality = { bloom: true, seedlingCap: 0 }; // cap 0 = uncapped
+
+  function applyQuality() {
+    if (!game) return;
+    game.setBloomEnabled(quality.bloom);
+    game.setSeedlingCap(quality.seedlingCap);
+  }
 
   function clearOverlay() {
     if (closeOverlay) {
@@ -63,6 +71,7 @@ export function createApp(canvas, root) {
     tearDownMatch();
     game = createGame(canvas, config);
     if (game.resize) game.resize(); // fit the freshly-sized world to the viewport
+    applyQuality(); // reapply session quality settings to the new match
     speed = 1;
     paused = false;
     gameOverShown = false;
@@ -81,6 +90,16 @@ export function createApp(canvas, root) {
       setSendFraction: (f) => game && game.setSendFraction(f),
       onPlant: (type) => game && game.input.plant(type),
       getSelected: () => (game ? game.input.selectedId() : -1),
+      // Quality settings: read/write the session-persistent state + apply live.
+      getQuality: () => quality,
+      setBloom: (on) => {
+        quality.bloom = !!on;
+        if (game) game.setBloomEnabled(quality.bloom);
+      },
+      setSeedlingCap: (n) => {
+        quality.seedlingCap = n;
+        if (game) game.setSeedlingCap(n);
+      },
     });
     state = APP_STATE.PLAYING;
   }
