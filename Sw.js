@@ -2,8 +2,10 @@
 // IMPORTANT: bump CACHE_VERSION on EVERY deploy or clients keep stale assets.
 const CACHE_VERSION = "bloomspace-v1";
 
-// App shell + heavy vendored deps. Web Awesome lazy-loads its ~150 component chunks on
-// demand; those are cached at runtime by the fetch handler rather than precached here.
+// App shell + heavy vendored deps. Web Awesome statically imports a graph of chunks from
+// its loader and also lazy-loads component chunks on demand; that recursive chunk graph is
+// cached at runtime by the fetch handler, not precached here. Full first-load-offline
+// support (precaching the whole WA chunk graph) is scheduled for T8's final SW cache pass.
 // All URLs are relative so they resolve correctly under a deploy subpath.
 const SHELL = [
   "./",
@@ -26,6 +28,9 @@ const SHELL = [
   "Vendor/Three/Jsm/shaders/LuminosityHighPassShader.js",
   "Vendor/Three/Jsm/shaders/OutputShader.js",
   "Vendor/FontAwesome/Css/All.min.css",
+  "Vendor/FontAwesome/Webfonts/fa-solid-900.woff2",
+  "Vendor/FontAwesome/Webfonts/fa-regular-400.woff2",
+  "Vendor/FontAwesome/Webfonts/fa-brands-400.woff2",
   "Vendor/WebAwesome/webawesome.loader.js",
   "Vendor/WebAwesome/styles/webawesome.css",
 ];
@@ -64,7 +69,9 @@ self.addEventListener("fetch", (event) => {
       if (cached) return cached;
       return fetch(req)
         .then((res) => {
-          if (res && res.ok && res.type === "basic") {
+          // Runtime-cache same-origin GETs (e.g. Web Awesome's lazy chunks). status===200
+          // only; opaque/cross-origin and partial (206) responses are skipped.
+          if (res && res.status === 200) {
             const copy = res.clone();
             caches.open(CACHE_VERSION).then((c) => c.put(req, copy));
           }
