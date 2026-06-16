@@ -15,12 +15,13 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 // Bloom runs at half-resolution per the perf budget.
 const BLOOM_SCALE = 0.5;
 
-// Bloom tuning — pleasing glow without washing the scene out.
-const BLOOM_STRENGTH = 1.15;
-const BLOOM_RADIUS = 0.45;
-const BLOOM_THRESHOLD = 0.0;
+// Bloom tuning — only bright things (seedlings, owner rims) glow; dark rocks/background
+// stay solid. A non-zero threshold is what keeps asteroids from blooming into "suns".
+const BLOOM_STRENGTH = 0.85;
+const BLOOM_RADIUS = 0.4;
+const BLOOM_THRESHOLD = 0.42;
 
-const MIN_ZOOM = 1; // fit-all (can't zoom further out than the whole world)
+const MIN_ZOOM = 0.82; // allow pulling back a little past fit-all to see the whole map
 const MAX_ZOOM = 8; // sane close-in limit
 const ZOOM_STEP = 1.0015; // per wheel-delta unit
 
@@ -83,10 +84,14 @@ export function createScene(canvas, world) {
     clampCenter();
     const halfW = baseHalfW / zoom;
     const halfH = baseHalfH / zoom;
-    camera.left = centerX - halfW;
-    camera.right = centerX + halfW;
-    camera.top = centerY + halfH;
-    camera.bottom = centerY - halfH;
+    // Frustum is RELATIVE to the camera; pan by MOVING the camera. (Offsetting the frustum
+    // by centerX/Y *and* positioning the camera at the center double-counts the offset and
+    // shoves the world into a corner — the old framing bug.)
+    camera.left = -halfW;
+    camera.right = halfW;
+    camera.top = halfH;
+    camera.bottom = -halfH;
+    camera.position.set(centerX, centerY, 100);
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
   }
