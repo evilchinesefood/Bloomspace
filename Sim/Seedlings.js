@@ -128,14 +128,44 @@ export function launchSeedling(world, i, dest) {
   aimAt(world, i, node);
 }
 
-// setRally — set or clear an asteroid's rally (anchor) point. Seedlings newly produced by a
-// seedling tree on this rock auto-move to the rally. Clears when target is the rock itself
-// or invalid. Only the rock's owner may set it.
+// setRally — set or clear an asteroid's rally (anchor) point. While a rally is set, the rock
+// continuously funnels its orbiting fighters to the anchor (see updateRally). Clears when the
+// target is the rock itself or invalid. Only the rock's owner may set it.
 export function setRally(world, fromId, toId, owner) {
   const rock = world.asteroids[fromId];
   if (!rock || rock.owner !== owner) return false;
   rock.rally = toId === fromId || !world.asteroids[toId] ? -1 : toId;
   return true;
+}
+
+// RALLY_INTERVAL — how often a rallied rock pushes a wave of orbiters forward. Throttled so
+// the funnel reads as a steady stream rather than a single-frame teleport of the whole orbit.
+const RALLY_INTERVAL = 0.35;
+
+// updateRally — what actually makes a rally point DO something: every rallied rock launches
+// its currently-orbiting FIGHTERS (kind 0) toward the anchor, draining both the rock's
+// existing seedlings and anything newly produced/arrived. Defenders (kind 1) stay to guard.
+// Arrivals re-home to the target (joinOrbit), so they aren't re-grabbed here — no loop.
+export function updateRally(world, dt) {
+  const s = world.seed;
+  for (const rock of world.asteroids) {
+    if (!rock || rock.rally == null || rock.rally < 0 || rock.owner < 0)
+      continue;
+    const tgt = world.asteroids[rock.rally];
+    if (!tgt || tgt.id === rock.id) {
+      rock.rally = -1;
+      continue;
+    }
+    rock.rallyCd = (rock.rallyCd ?? 0) - dt;
+    if (rock.rallyCd > 0) continue;
+    rock.rallyCd = RALLY_INTERVAL;
+    for (let i = 0; i < s.count; i++) {
+      if (s.state[i] !== STATE.ORBIT) continue;
+      if (s.home[i] !== rock.id || s.owner[i] !== rock.owner) continue;
+      if (s.kind[i] !== 0) continue; // keep defenders home
+      launchSeedling(world, i, tgt);
+    }
+  }
 }
 
 // sendSeedlings — dispatch floor(eligible * fraction) ORBITing seedlings of `owner`

@@ -2,7 +2,7 @@
 // Declares the SoA shape from the plan; orchestrates the per-tick sim.
 import { generateMap } from "./MapGen.js";
 import { updateMoons } from "./Moons.js";
-import { updateSeedlings } from "./Seedlings.js";
+import { updateSeedlings, updateRally } from "./Seedlings.js";
 import { resolveCombat } from "./Combat.js";
 import { updateEconomy } from "./Economy.js";
 import { updateTrees } from "./Trees.js";
@@ -138,6 +138,7 @@ export function step(world, dt) {
   s.py.set(s.y.subarray(0, s.count));
   updateMoons(world, dt); // move moons first so anything orbiting them reads fresh positions
   updateAi(world, dt); // AI issues commands that take effect through the pipeline below
+  updateRally(world, dt); // rallied rocks funnel their orbiting fighters to the anchor
   updateSeedlings(world, dt);
   resolveCombat(world, dt);
   updateEconomy(world, dt);

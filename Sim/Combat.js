@@ -182,7 +182,10 @@ function flipOwnership(world) {
       else if (rival !== o) rival = -3;
     }
     if (ownerPresent) continue;
-    if (rival >= 0) rock.owner = rival; // exactly one rival side, defenders gone → flip
+    if (rival >= 0) {
+      rock.owner = rival; // exactly one rival side, defenders gone → flip
+      rock.rally = -1; // a captured rock drops the old owner's rally anchor
+    }
   }
 }
 

@@ -230,3 +230,52 @@ test("rally: seedling-tree production auto-routes new seedlings to the anchor", 
   }
   assert.ok(routed, "new production never routed to the rally anchor");
 });
+
+test("rally drains a rock's existing orbiting fighters to the anchor (no tree needed)", () => {
+  const w = world();
+  const home = ownedRock(w);
+  const anchor = neutralRock(w);
+  const s = w.seed;
+  const orbitingAtHome = () => {
+    let n = 0;
+    for (let i = 0; i < s.count; i++)
+      if (s.owner[i] === 0 && s.home[i] === home.id && s.state[i] === 0) n++;
+    return n;
+  };
+  const before = orbitingAtHome();
+  assert.ok(before > 0, "home should start with orbiting seedlings");
+  assert.ok(setRally(w, home.id, anchor.id, 0));
+  for (let i = 0; i < 600; i++) Sim.step(w, DT);
+  assert.equal(
+    orbitingAtHome(),
+    0,
+    "rally never funneled the existing orbiters out",
+  );
+  assert.equal(
+    anchor.owner,
+    0,
+    "funneled fighters never reached/colonized the anchor",
+  );
+});
+
+test("rally keeps defenders (kind 1) home while funneling fighters", () => {
+  const w = world();
+  const home = ownedRock(w);
+  const anchor = neutralRock(w);
+  const di = Sim.spawnSeedling(w, { home: home.id, owner: 0, kind: 1 });
+  assert.ok(di >= 0);
+  assert.ok(setRally(w, home.id, anchor.id, 0));
+  for (let i = 0; i < 600; i++) Sim.step(w, DT);
+  const s = w.seed;
+  const defendersHome = () => {
+    let n = 0;
+    for (let i = 0; i < s.count; i++)
+      if (s.owner[i] === 0 && s.home[i] === home.id && s.kind[i] === 1) n++;
+    return n;
+  };
+  assert.equal(
+    defendersHome(),
+    1,
+    "rally wrongly funneled the defender away from home",
+  );
+});
