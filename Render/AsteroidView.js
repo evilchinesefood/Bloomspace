@@ -1,12 +1,24 @@
-// Render/AsteroidView.js — bodies drawn as shaded spheres with three looks (rocky asteroid,
-// gas giant, terran planet), grouped into one instanced mesh per texture. A bright owner rim
-// shows ownership (and glows), plus the neighbor-network lines, LOD aggregate glow, selection
-// ring, and the rally route polyline. Asteroid count is small and `id === index`.
+// Render/AsteroidView.js — bodies as shaded spheres. Asteroids + moons share one instanced
+// rock mesh; each PLANET is its own mesh with a UNIQUE procedural texture (seeded per planet,
+// gas giant or terran — no two alike). Moons orbit their planet, so their body/rim/edge update
+// every frame. A bright owner rim shows ownership; plus the neighbor network, LOD glow,
+// selection ring, and rally route. `id === index`.
 import * as THREE from "three";
 import { ownerColor, ownerColorHex } from "./Palette.js";
 import { lodActive } from "./SeedlingView.js";
 
-// --- Body textures: a lit sphere gradient + per-type surface detail, drawn once. ----------
+// Small seeded PRNG so each planet's look is unique but stable.
+function rngFrom(seed) {
+  let s = seed >>> 0 || 1;
+  return () => {
+    s |= 0;
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function disc(ctx, s) {
   ctx.beginPath();
   ctx.arc(s / 2, s / 2, s / 2, 0, Math.PI * 2);
@@ -59,6 +71,16 @@ function makeTex(detail, stops) {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
+const hsl = (h, sa, l) => `hsl(${h},${sa}%,${l}%)`;
+function sphereStops(h, sa, l) {
+  return [
+    hsl(h, sa, l),
+    hsl(h, sa, l - 22),
+    hsl(h, sa, l - 42),
+    hsl(h, sa, l - 58),
+  ];
+}
+
 function rockTexture() {
   return makeTex(
     (ctx, s) => {
@@ -77,41 +99,64 @@ function rockTexture() {
     ["#e9edf3", "#b4b9c2", "#777c87", "#3a3e46"],
   );
 }
-function gasTexture() {
+
+// Unique gas giant: warm hue, varied band count/lightness + a storm oval.
+function gasTexture(rnd) {
+  const h = 8 + rnd() * 50; // red→yellow
+  const sa = 52 + rnd() * 22;
+  const l = 68 + rnd() * 12;
+  const bands = 5 + Math.floor(rnd() * 5);
   return makeTex(
     (ctx, s) => {
-      ctx.globalAlpha = 0.18;
-      for (let b = 0; b < 7; b++) {
-        const y = ((b + 0.5) / 7) * s;
-        const h = (s / 7) * 0.6;
-        ctx.fillStyle = b % 2 ? "#7a3e10" : "#ffd9a0";
-        ctx.fillRect(0, y - h / 2, s, h);
+      for (let b = 0; b < bands; b++) {
+        const y = ((b + 0.5) / bands) * s;
+        const hgt = (s / bands) * (0.5 + rnd() * 0.5);
+        ctx.globalAlpha = 0.16 + rnd() * 0.14;
+        ctx.fillStyle = hsl(h + (rnd() * 16 - 8), sa, b % 2 ? l - 18 : l + 8);
+        ctx.fillRect(0, y - hgt / 2, s, hgt);
       }
-      ctx.globalAlpha = 0.5; // a storm oval
-      ctx.fillStyle = "#d65a2a";
+      ctx.globalAlpha = 0.55; // storm
+      ctx.fillStyle = hsl((h + 18) % 360, sa + 10, l - 28);
       ctx.beginPath();
-      ctx.ellipse(s * 0.6, s * 0.58, s * 0.1, s * 0.06, 0, 0, Math.PI * 2);
+      ctx.ellipse(
+        s * (0.35 + rnd() * 0.4),
+        s * (0.4 + rnd() * 0.35),
+        s * (0.07 + rnd() * 0.06),
+        s * (0.045 + rnd() * 0.04),
+        0,
+        0,
+        Math.PI * 2,
+      );
       ctx.fill();
     },
-    ["#ffe6b8", "#f0b46a", "#c87a3a", "#5e3618"],
+    sphereStops(h, sa, l),
   );
 }
-function terranTexture() {
+
+// Unique terran world: varied ocean hue + scattered continents + polar caps.
+function terranTexture(rnd) {
+  const oceanH = 190 + rnd() * 70; // blue→cyan→violet
+  const sa = 48 + rnd() * 26;
+  const l = 62 + rnd() * 12;
+  const landH = 80 + rnd() * 60; // green→olive
+  const blobs = 4 + Math.floor(rnd() * 4);
   return makeTex(
     (ctx, s) => {
-      const greens = ["#3f8f4e", "#5fae5a", "#7a6a3a"];
       ctx.globalAlpha = 0.85;
-      for (let i = 0; i < 6; i++) {
-        const a = i * 2.39996;
-        const px = s / 2 + Math.cos(a) * s * 0.2 * (0.4 + i / 10);
-        const py = s / 2 + Math.sin(a * 1.3) * s * 0.2;
-        ctx.fillStyle = greens[i % 3];
+      for (let i = 0; i < blobs; i++) {
+        const a = rnd() * Math.PI * 2;
+        const rad = (0.12 + rnd() * 0.28) * s;
+        ctx.fillStyle = hsl(
+          landH + (rnd() * 30 - 15),
+          45 + rnd() * 20,
+          38 + rnd() * 18,
+        );
         ctx.beginPath();
         ctx.ellipse(
-          px,
-          py,
-          s * 0.14 * (0.6 + (i % 3) / 4),
-          s * 0.1 * (0.6 + (i % 4) / 5),
+          s / 2 + Math.cos(a) * rad,
+          s / 2 + Math.sin(a) * rad,
+          s * (0.1 + rnd() * 0.1),
+          s * (0.07 + rnd() * 0.09),
           a,
           0,
           Math.PI * 2,
@@ -121,13 +166,14 @@ function terranTexture() {
       ctx.globalAlpha = 0.5; // polar caps
       ctx.fillStyle = "#eaf6ff";
       ctx.beginPath();
-      ctx.ellipse(s / 2, s * 0.12, s * 0.18, s * 0.06, 0, 0, Math.PI * 2);
+      ctx.ellipse(s / 2, s * 0.11, s * 0.18, s * 0.06, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.beginPath();
-      ctx.ellipse(s / 2, s * 0.88, s * 0.18, s * 0.06, 0, 0, Math.PI * 2);
+      ctx.ellipse(s / 2, s * 0.89, s * 0.18, s * 0.06, 0, 0, Math.PI * 2);
       ctx.fill();
+      void oceanH;
     },
-    ["#dff0ff", "#79b6e6", "#2f6fae", "#143a5e"],
+    sphereStops(oceanH, sa, l),
   );
 }
 
@@ -138,48 +184,54 @@ export function createAsteroidView(scene, world, camCtl) {
   const col = new THREE.Color();
   const lastOwner = new Int32Array(n).fill(-99);
 
-  // --- Bodies: one instanced mesh per texture (rock / gas giant / terran planet) ---
-  const texFor = {
-    asteroid: rockTexture(),
-    gas: gasTexture(),
-    terran: terranTexture(),
-  };
-  const groups = { asteroid: [], gas: [], terran: [] };
+  const moonIds = [];
+  for (let i = 0; i < n; i++) if (rocks[i].moon) moonIds.push(i);
+  const hasMoons = moonIds.length > 0;
+
+  // --- Bodies: asteroids + moons in one instanced rock mesh; planets each their own mesh ---
+  const rockIds = [];
+  for (let i = 0; i < n; i++) if (rocks[i].kind !== "planet") rockIds.push(i);
+  const rockLi = new Int32Array(n).fill(-1); // asteroid id -> local index in rock mesh
+  const rockMesh = new THREE.InstancedMesh(
+    new THREE.CircleGeometry(1, 40),
+    new THREE.MeshBasicMaterial({ map: rockTexture(), color: 0x8c8c8c }),
+    Math.max(1, rockIds.length),
+  );
+  rockMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  for (let k = 0; k < rockIds.length; k++) {
+    const a = rocks[rockIds[k]];
+    rockLi[rockIds[k]] = k;
+    dummy.position.set(a.x, a.y, -2);
+    dummy.scale.set(a.radius, a.radius, 1);
+    dummy.updateMatrix();
+    rockMesh.setMatrixAt(k, dummy.matrix);
+  }
+  rockMesh.count = rockIds.length;
+  rockMesh.instanceMatrix.needsUpdate = true;
+  scene.add(rockMesh);
+
   for (let i = 0; i < n; i++) {
     const a = rocks[i];
-    (
-      groups[a.kind === "planet" ? a.ptype : "asteroid"] || groups.asteroid
-    ).push(i);
-  }
-  for (const key of Object.keys(groups)) {
-    const ids = groups[key];
-    if (ids.length === 0) continue;
-    const mesh = new THREE.InstancedMesh(
-      new THREE.CircleGeometry(1, 40),
-      // Darkened so the lit highlight stays under the bloom threshold (no white "suns").
-      new THREE.MeshBasicMaterial({ map: texFor[key], color: 0x8c8c8c }),
-      ids.length,
+    if (a.kind !== "planet") continue;
+    const rnd = rngFrom(a.seed || a.id + 1);
+    const tex = a.ptype === "terran" ? terranTexture(rnd) : gasTexture(rnd);
+    const pm = new THREE.Mesh(
+      new THREE.CircleGeometry(1, 48),
+      new THREE.MeshBasicMaterial({ map: tex, color: 0x8c8c8c }),
     );
-    mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
-    for (let k = 0; k < ids.length; k++) {
-      const a = rocks[ids[k]];
-      dummy.position.set(a.x, a.y, -2);
-      dummy.scale.set(a.radius, a.radius, 1);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(k, dummy.matrix);
-    }
-    mesh.instanceMatrix.needsUpdate = true;
-    scene.add(mesh);
+    pm.position.set(a.x, a.y, -2);
+    pm.scale.set(a.radius, a.radius, 1);
+    scene.add(pm);
   }
 
-  // --- Rims: bright owner-colored ring hugging each rock edge (this is what glows) ---
+  // --- Rims (owner-colored, one per body; moon rims update each frame) ---
   const rims = new THREE.InstancedMesh(
     new THREE.RingGeometry(0.9, 1.02, 44),
     new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
     Math.max(1, n),
   );
   rims.count = n;
-  rims.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  rims.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   rims.instanceColor = new THREE.InstancedBufferAttribute(
     new Float32Array(Math.max(1, n) * 3),
     3,
@@ -194,29 +246,39 @@ export function createAsteroidView(scene, world, camCtl) {
   rims.instanceMatrix.needsUpdate = true;
   scene.add(rims);
 
-  // --- Neighbor network: faint static lines between connected asteroids (travel routes) ---
-  const edgePts = [];
-  for (let i = 0; i < n; i++) {
-    for (const j of rocks[i].neighbors || []) {
-      if (j <= i) continue;
-      edgePts.push(rocks[i].x, rocks[i].y, -2.2, rocks[j].x, rocks[j].y, -2.2);
+  // --- Neighbor network (faint; moon edges move so rebuild positions when there are moons) ---
+  const edgePairs = [];
+  for (let i = 0; i < n; i++)
+    for (const j of rocks[i].neighbors || []) if (j > i) edgePairs.push([i, j]);
+  const netGeo = new THREE.BufferGeometry();
+  const netPos = new Float32Array(edgePairs.length * 6);
+  function writeNet() {
+    for (let e = 0; e < edgePairs.length; e++) {
+      const a = rocks[edgePairs[e][0]];
+      const b = rocks[edgePairs[e][1]];
+      const o = e * 6;
+      netPos[o] = a.x;
+      netPos[o + 1] = a.y;
+      netPos[o + 2] = -2.2;
+      netPos[o + 3] = b.x;
+      netPos[o + 4] = b.y;
+      netPos[o + 5] = -2.2;
     }
   }
+  writeNet();
+  netGeo.setAttribute("position", new THREE.BufferAttribute(netPos, 3));
   const net = new THREE.LineSegments(
-    new THREE.BufferGeometry().setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(edgePts, 3),
-    ),
+    netGeo,
     new THREE.LineBasicMaterial({
       color: 0x5878b4,
       transparent: true,
-      opacity: 0.7,
+      opacity: 0.35,
     }),
   );
   net.frustumCulled = false;
   scene.add(net);
 
-  // --- LOD aggregate glow: one additive disc per rock, scaled/tinted by orbiter count ---
+  // --- LOD aggregate glow ---
   const glow = new THREE.InstancedMesh(
     new THREE.CircleGeometry(1, 20),
     new THREE.MeshBasicMaterial({
@@ -238,7 +300,7 @@ export function createAsteroidView(scene, world, camCtl) {
   const glowCol = new THREE.Color();
   const orbitCount = new Int32Array(n);
 
-  // --- Selection highlight ---
+  // --- Selection highlight (repositioned each frame so it tracks moving moons) ---
   const selRing = new THREE.Mesh(
     new THREE.RingGeometry(1, 1.04, 64),
     new THREE.MeshBasicMaterial({
@@ -253,7 +315,7 @@ export function createAsteroidView(scene, world, camCtl) {
   scene.add(selRing);
   let selectedId = -1;
 
-  // --- Rally route polyline (through the network) + target marker ---
+  // --- Rally route polyline + target marker ---
   const rallyGeo = new THREE.BufferGeometry();
   rallyGeo.setAttribute(
     "position",
@@ -281,15 +343,7 @@ export function createAsteroidView(scene, world, camCtl) {
 
   function setSelected(id) {
     selectedId = id;
-    const a = rocks[id];
-    if (!a) {
-      selRing.visible = false;
-      return;
-    }
-    const rr = a.radius + 9;
-    selRing.scale.set(rr, rr, 1);
-    selRing.position.set(a.x, a.y, -1);
-    selRing.visible = true;
+    selRing.visible = !!rocks[id];
   }
   function clearSelected() {
     selectedId = -1;
@@ -297,6 +351,7 @@ export function createAsteroidView(scene, world, camCtl) {
   }
 
   function update() {
+    // owner-tint rims on change
     let dirty = false;
     for (let i = 0; i < n; i++) {
       const o = rocks[i].owner;
@@ -308,6 +363,33 @@ export function createAsteroidView(scene, world, camCtl) {
       }
     }
     if (dirty && rims.instanceColor) rims.instanceColor.needsUpdate = true;
+
+    // moving moons: update their rock body + rim, and the network edges
+    if (hasMoons) {
+      for (const id of moonIds) {
+        const a = rocks[id];
+        dummy.position.set(a.x, a.y, -2);
+        dummy.scale.set(a.radius, a.radius, 1);
+        dummy.updateMatrix();
+        rockMesh.setMatrixAt(rockLi[id], dummy.matrix);
+        dummy.position.set(a.x, a.y, -1.9);
+        dummy.updateMatrix();
+        rims.setMatrixAt(id, dummy.matrix);
+      }
+      rockMesh.instanceMatrix.needsUpdate = true;
+      rims.instanceMatrix.needsUpdate = true;
+      writeNet();
+      netGeo.attributes.position.needsUpdate = true;
+    }
+
+    // selection ring tracks the (possibly moving) selected rock
+    const sel = selectedId >= 0 ? rocks[selectedId] : null;
+    if (sel) {
+      const rr = sel.radius + 9;
+      selRing.scale.set(rr, rr, 1);
+      selRing.position.set(sel.x, sel.y, -1);
+    }
+
     updateGlow();
     updateRally();
   }

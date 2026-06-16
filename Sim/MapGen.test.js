@@ -13,8 +13,8 @@ function mk(seed, count = 16, players = TWO) {
     seed,
     asteroidCount: count,
     players,
-    width: 1000,
-    height: 1000,
+    width: 2000, // roomy enough for the wider spacing + large planets
+    height: 2000,
   });
 }
 
@@ -94,6 +94,8 @@ test("no two asteroids overlap", () => {
   const A = w.asteroids;
   for (let i = 0; i < A.length; i++) {
     for (let j = i + 1; j < A.length; j++) {
+      // Moons orbit their planet and intentionally pass near other bodies — skip them.
+      if (A[i].moon || A[j].moon) continue;
       const d = Math.hypot(A[i].x - A[j].x, A[i].y - A[j].y);
       assert.ok(d > A[i].radius + A[j].radius, `asteroids ${i},${j} overlap`);
     }

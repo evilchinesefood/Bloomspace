@@ -14,10 +14,21 @@ export const APP_STATE = {
   GAMEOVER: "gameover",
 };
 
-export function createApp(canvas, root) {
+export function createApp(root) {
   let state = APP_STATE.MENU;
   let game = null; // current Game instance (null in MENU/SETUP)
+  let canvas = null; // a FRESH canvas per match (see freshCanvas)
   let hud = null;
+
+  // Each match gets a brand-new <canvas> behind the #Ui layer. Reusing one canvas breaks
+  // re-launch: Game.destroy() force-loses its WebGL context to free it, and a context-lost
+  // canvas can't back a new renderer — so the next match would render nothing.
+  function freshCanvas() {
+    const c = document.createElement("canvas");
+    c.id = "Canvas"; // picks up the full-screen #Canvas styling from Index.html
+    document.body.insertBefore(c, root); // behind the #Ui overlay
+    return c;
+  }
   let speed = 1; // 1×/2×/3× sim-time multiplier
   let paused = false;
   let closeOverlay = null; // teardown for the current full-screen overlay
@@ -46,6 +57,10 @@ export function createApp(canvas, root) {
       game.destroy();
       game = null;
     }
+    if (canvas) {
+      canvas.remove(); // drop the (now context-lost) canvas; the next match makes a fresh one
+      canvas = null;
+    }
   }
 
   // --- State transitions -----------------------------------------------------
@@ -69,6 +84,7 @@ export function createApp(canvas, root) {
   function startMatch(config) {
     clearOverlay();
     tearDownMatch();
+    canvas = freshCanvas();
     game = createGame(canvas, config);
     if (game.resize) game.resize(); // fit the freshly-sized world to the viewport
     applyQuality(); // reapply session quality settings to the new match

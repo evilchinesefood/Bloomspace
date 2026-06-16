@@ -13,10 +13,12 @@ import { createPicking } from "./Render/Picking.js";
 import { createInput } from "./Ui/Input.js";
 
 const DEFAULT_CONFIG = {
-  width: 1000,
-  height: 1000,
+  width: 1700,
+  height: 1700,
   seed: 1337,
-  asteroidCount: 24,
+  asteroidCount: 26,
+  planetMin: 1,
+  planetMax: 2,
   players: [
     { id: 0, isAi: false, difficulty: 0 },
     { id: 1, isAi: true, difficulty: 1 },

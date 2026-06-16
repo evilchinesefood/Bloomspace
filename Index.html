@@ -71,7 +71,8 @@
     </script>
   </head>
   <body>
-    <canvas id="Canvas"></canvas>
+    <!-- The game <canvas id="Canvas"> is created fresh per match by Ui/App.js (a reused
+         canvas can't be re-used after its WebGL context is force-lost on teardown). -->
     <div id="Ui"></div>
 
     <script type="module" src="./Main.js"></script>

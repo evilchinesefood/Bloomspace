@@ -2,9 +2,27 @@
 // skirmish setup dialog, and the win/lose screen. Each is a function that builds DOM into
 // the #Ui layer and resolves/calls back when the player acts. Chrome only; no sim/render.
 const SIZES = {
-  small: { width: 700, height: 700, asteroids: 12 },
-  medium: { width: 1000, height: 1000, asteroids: 24 },
-  large: { width: 1400, height: 1400, asteroids: 40 },
+  small: {
+    width: 1100,
+    height: 1100,
+    asteroids: 14,
+    planetMin: 0,
+    planetMax: 1,
+  },
+  medium: {
+    width: 1700,
+    height: 1700,
+    asteroids: 26,
+    planetMin: 1,
+    planetMax: 2,
+  },
+  large: {
+    width: 2400,
+    height: 2400,
+    asteroids: 44,
+    planetMin: 1,
+    planetMax: 3,
+  },
 };
 
 const el = (tag, props = {}, kids = []) => {
@@ -179,28 +197,30 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
       control,
     ]);
 
-  const sizeSel = el("wa-select", { value: "medium" }, [
-    el("wa-option", { value: "small", textContent: "Small (12 asteroids)" }),
-    el("wa-option", { value: "medium", textContent: "Medium (24 asteroids)" }),
-    el("wa-option", { value: "large", textContent: "Large (40 asteroids)" }),
+  // NOTE: wa-select values are set AFTER the components define (see below) — setting `value`
+  // before the <wa-option> children exist fails to pre-fill on a rebuilt dialog (New Game).
+  const sizeSel = el("wa-select", {}, [
+    el("wa-option", { value: "small", textContent: "Small (14 bodies)" }),
+    el("wa-option", { value: "medium", textContent: "Medium (26 bodies)" }),
+    el("wa-option", { value: "large", textContent: "Large (44 bodies)" }),
   ]);
 
   const countSlider = el("wa-slider", {
     min: 6,
     max: 60,
-    value: 24,
+    value: 26,
     step: 1,
     "with-tooltip": true,
     style: "width:100%;",
   });
 
-  const aiSel = el("wa-select", { value: "1" }, [
+  const aiSel = el("wa-select", {}, [
     el("wa-option", { value: "1", textContent: "1 AI opponent" }),
     el("wa-option", { value: "2", textContent: "2 AI opponents" }),
     el("wa-option", { value: "3", textContent: "3 AI opponents" }),
   ]);
 
-  const diffSel = el("wa-select", { value: "1" }, [
+  const diffSel = el("wa-select", {}, [
     el("wa-option", { value: "0", textContent: "Easy (passive)" }),
     el("wa-option", { value: "1", textContent: "Normal" }),
     el("wa-option", { value: "2", textContent: "Hard" }),
@@ -258,6 +278,8 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
       width: size.width,
       height: size.height,
       asteroidCount,
+      planetMin: size.planetMin,
+      planetMax: size.planetMax,
       players,
       seed,
     });
@@ -265,6 +287,17 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
 
   wrap.append(dialog);
   root.append(wrap);
+  // Pre-fill the dropdowns once Web Awesome has defined wa-select (so the value applies with
+  // its options already present — this is the part that was blank on a New Game reset).
+  const prefill = () => {
+    sizeSel.value = "medium";
+    aiSel.value = "1";
+    diffSel.value = "1";
+  };
+  if (window.customElements && customElements.whenDefined) {
+    customElements.whenDefined("wa-select").then(prefill);
+  }
+  prefill();
   return cleanup;
 }
 

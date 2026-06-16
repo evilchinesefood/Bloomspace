@@ -1,6 +1,7 @@
 // Sim/World.js — game state + data contract. NO three.js import (must run headless).
 // Declares the SoA shape from the plan; orchestrates the per-tick sim.
 import { generateMap } from "./MapGen.js";
+import { updateMoons } from "./Moons.js";
 import { updateSeedlings } from "./Seedlings.js";
 import { resolveCombat } from "./Combat.js";
 import { updateEconomy } from "./Economy.js";
@@ -135,6 +136,7 @@ export function step(world, dt) {
   // Snapshot positions for render interpolation.
   s.px.set(s.x.subarray(0, s.count));
   s.py.set(s.y.subarray(0, s.count));
+  updateMoons(world, dt); // move moons first so anything orbiting them reads fresh positions
   updateAi(world, dt); // AI issues commands that take effect through the pipeline below
   updateSeedlings(world, dt);
   resolveCombat(world, dt);

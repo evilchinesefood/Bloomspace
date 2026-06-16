@@ -8,9 +8,8 @@ const STEP = 1 / 30; // fixed sim timestep (seconds)
 const MAX_STEPS = 5; // cap steps/frame to avoid spiral-of-death
 
 function boot() {
-  const canvas = document.getElementById("Canvas");
   const root = document.getElementById("Ui");
-  const app = createApp(canvas, root);
+  const app = createApp(root); // App creates a fresh <canvas> per match
 
   let last = performance.now();
   let acc = 0;
