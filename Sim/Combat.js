@@ -95,6 +95,9 @@ export function resolveCombat(world, dt) {
       }
     }
     // Mark slain now; do NOT kill mid-scan (would corrupt indices for later i).
+    // A unit that dies this tick still dealt its damage above (outgoing damage reads
+    // `strength`, never the depleted `energy`) — deliberate simultaneous resolution. Do
+    // NOT "fix" this into an order-dependent two-phase pass; it would break determinism.
     if (s.energy[i] <= 0) {
       s.state[i] = STATE.DEAD;
     } else if (s.state[i] !== STATE.TRANSIT) {
@@ -119,6 +122,10 @@ export function resolveCombat(world, dt) {
 // still present, or 2+ rivals) → no flip. Neutral first-arrival colonization is T2's job.
 //
 // INVARIANT: only asteroid.owner is mutated; the array is never reordered/removed.
+// PERF (T8): this scans all seedlings per owned asteroid — O(asteroids × seedlings). Fine
+// at the v1 scale (~dozens of rocks, few-thousand cap → sub-ms/tick). If rock counts reach
+// the hundreds or the seedling cap grows well past 4k, query the spatial grid cells within
+// `reach` of each rock instead of scanning the whole SoA.
 function flipOwnership(world) {
   const s = world.seed;
   const asts = world.asteroids;

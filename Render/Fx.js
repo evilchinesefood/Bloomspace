@@ -6,6 +6,7 @@ import * as THREE from "three";
 const POOL = 1024; // max simultaneous particles
 const TAU = Math.PI * 2;
 
+// `world` is unused today; kept for create*(scene, world) symmetry with the other views.
 export function createFx(scene, world) {
   const pos = new Float32Array(POOL * 3);
   const colArr = new Float32Array(POOL * 3); // displayed color (faded)
@@ -20,6 +21,9 @@ export function createFx(scene, world) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
   geo.setAttribute("color", new THREE.BufferAttribute(colArr, 3));
+  // Both attributes are rewritten every frame — hint the driver.
+  geo.getAttribute("position").setUsage(THREE.DynamicDrawUsage);
+  geo.getAttribute("color").setUsage(THREE.DynamicDrawUsage);
   geo.setDrawRange(0, POOL);
 
   const mat = new THREE.PointsMaterial({

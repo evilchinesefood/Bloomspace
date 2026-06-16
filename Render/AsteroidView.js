@@ -116,5 +116,13 @@ export function createAsteroidView(scene, world) {
   }
   update();
 
-  return { bodies, ringGroup, setSelected, clearSelected, update };
+  // selected() lets T7's input loop query the current selection.
+  return {
+    bodies,
+    ringGroup,
+    setSelected,
+    clearSelected,
+    selected: () => selectedId,
+    update,
+  };
 }
