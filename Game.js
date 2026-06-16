@@ -121,6 +121,11 @@ export function createGame(canvas, config = {}) {
     }
   }
 
+  // Warm-up render: three.js + UnrealBloomPass compile their shaders lazily on first render,
+  // which otherwise lands as a ~200ms hitch in the first animation frame. Do it here, at
+  // match setup (right after the player hits Start), so the game loop stays smooth.
+  render(0);
+
   return {
     world,
     step: (dt) => Sim.step(world, dt),
