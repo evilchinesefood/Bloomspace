@@ -5,8 +5,8 @@
 //
 // Perf (T8): viewport culling + LOD. We only push instances whose interpolated world
 // position is inside the camera frustum + margin, packed into low indices, and set
-// mesh.count to that visible total. Below LOD_ZOOM (zoomed far out) we draw NO individual
-// seedlings (mesh.count = 0) — AsteroidView shows owner-colored aggregate glow instead.
+// mesh.count to that visible total. When seedlings would be sub-pixel (apparent-size LOD)
+// we draw NO individual seedlings (mesh.count = 0) — AsteroidView shows aggregate glow.
 // A render-only cap (setCap) hard-limits drawn instances for low-end devices.
 import * as THREE from "three";
 import { STATE } from "../Sim/World.js";
@@ -18,8 +18,19 @@ const SNAP_THRESHOLD = 140;
 const SNAP_SQ = SNAP_THRESHOLD * SNAP_THRESHOLD;
 const COMBAT_TINT = 0xff7a3c; // hotter color for fighting seedlings
 const CULL_MARGIN = 40; // world units of slack around the frustum
-// Below this zoom factor (1 = fit-all), individual seedlings collapse into rock glow.
-const LOD_ZOOM = 1.6;
+const SEED_RADIUS = 6; // matches the CircleGeometry radius below
+// When a seedling would draw smaller than this many screen px (diameter), collapse the
+// whole field into AsteroidView's per-rock aggregate glow instead of drawing each one.
+const MIN_SEED_PX = 3;
+
+// LOD keyed on APPARENT on-screen size, not the zoom factor — so the default fit-all view
+// shows seedlings on every map size, and the aggregate only kicks in when they'd be
+// sub-pixel specks (huge maps / very zoomed out). Shared with AsteroidView.
+export function lodActive(camCtl) {
+  if (!camCtl || !camCtl.getWorldPerPixel) return false;
+  const wpp = camCtl.getWorldPerPixel();
+  return wpp > 0 && (SEED_RADIUS * 2) / wpp < MIN_SEED_PX;
+}
 
 // camCtl is the scene controller from createScene (getZoom + camera frustum). Optional so
 // the view still constructs in a bare-scene test, falling back to "draw everything".
@@ -50,10 +61,9 @@ export function createSeedlingView(scene, world, camCtl) {
 
   function update(alpha) {
     const s = world.seed;
-    const zoom = camCtl ? camCtl.getZoom() : 1;
 
-    // LOD far tier: skip individual seedlings entirely; AsteroidView aggregates.
-    if (camCtl && zoom < LOD_ZOOM) {
+    // LOD far tier: when seedlings would be sub-pixel, skip them; AsteroidView aggregates.
+    if (lodActive(camCtl)) {
       mesh.count = 0;
       return;
     }
@@ -102,7 +112,5 @@ export function createSeedlingView(scene, world, camCtl) {
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }
 
-  return { mesh, update, setCap, LOD_ZOOM };
+  return { mesh, update, setCap };
 }
-
-export { LOD_ZOOM };

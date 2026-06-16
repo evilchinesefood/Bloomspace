@@ -215,7 +215,11 @@ export function createScene(canvas, world) {
     resetCamera,
     setBloomEnabled,
     disposeControls,
-    // Live zoom factor (1 = fit-all, >1 = zoomed in) for LOD decisions.
+    // Live zoom factor (1 = fit-all, >1 = zoomed in).
     getZoom: () => zoom,
+    // World units covered by one screen pixel at the current zoom — drives apparent-size
+    // LOD so the default fit-all view shows seedlings on every map size.
+    getWorldPerPixel: () =>
+      (2 * baseHalfW) / zoom / (canvas.clientWidth || window.innerWidth),
   };
 }

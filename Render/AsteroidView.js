@@ -4,13 +4,13 @@
 // Asteroid count is small (dozens) and `id === index` and rocks are never removed, so
 // per-rock ring meshes are fine; bodies stay instanced. Re-tints each frame on owner flip.
 //
-// LOD aggregate glow (T8): when zoomed far out (zoom < LOD_ZOOM), SeedlingView stops
-// drawing individual seedlings. To keep the map readable, each rock gets an owner-colored
-// glow disc that brightens + scales with the count of seedlings orbiting it. Above the
-// threshold the glow is hidden and individual seedlings carry the look.
+// LOD aggregate glow (T8): when seedlings would be sub-pixel (apparent-size LOD, shared
+// via SeedlingView.lodActive), SeedlingView stops drawing individual seedlings. To keep the
+// map readable, each rock gets an owner-colored glow disc that brightens + scales with the
+// count of seedlings orbiting it. Otherwise the glow is hidden and seedlings carry the look.
 import * as THREE from "three";
 import { ownerColor, ownerColorHex } from "./Palette.js";
-import { LOD_ZOOM } from "./SeedlingView.js";
+import { lodActive } from "./SeedlingView.js";
 
 const TAU = Math.PI * 2;
 
@@ -144,10 +144,10 @@ export function createAsteroidView(scene, world, camCtl) {
     updateGlow();
   }
 
-  // LOD glow: only active (and only paying the per-seedling tally) when zoomed far out.
+  // LOD glow: only active (and only paying the per-seedling tally) when seedlings are
+  // sub-pixel (apparent-size LOD, shared with SeedlingView).
   function updateGlow() {
-    const zoom = camCtl ? camCtl.getZoom() : 1;
-    if (!camCtl || zoom >= LOD_ZOOM) {
+    if (!lodActive(camCtl)) {
       if (glow.count !== 0) glow.count = 0;
       return;
     }
