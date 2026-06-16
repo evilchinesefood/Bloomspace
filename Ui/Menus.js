@@ -31,12 +31,80 @@ function overlay(extraStyle = "") {
   });
 }
 
-// Start menu: title + New Skirmish. onNew() is called when the player starts.
+// Animated starfield for the start screen — matches the in-game look (dim blue-white stars
+// on deep space) with a gentle downward parallax drift. Returns stop() to cancel it.
+function startStarfield(canvas) {
+  const ctx = canvas.getContext("2d");
+  const COLORS = ["#7f8eac", "#a6b1c8", "#7d9ed8", "#dfe6f5"];
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let w = 0,
+    h = 0,
+    stars = [],
+    raf = 0,
+    last = 0;
+
+  function resize() {
+    const cw = canvas.clientWidth || window.innerWidth;
+    const ch = canvas.clientHeight || window.innerHeight;
+    w = canvas.width = Math.max(1, Math.floor(cw * dpr));
+    h = canvas.height = Math.max(1, Math.floor(ch * dpr));
+    const n = Math.round((w * h) / (9000 * dpr));
+    stars = [];
+    for (let i = 0; i < n; i++) {
+      const depth = Math.random(); // 0 far … 1 near
+      stars.push({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        r: (0.5 + depth * 1.6) * dpr,
+        spd: (6 + depth * 26) * dpr, // px/sec — near stars drift faster (parallax)
+        a: 0.35 + depth * 0.5,
+        c: COLORS[Math.floor(Math.random() * COLORS.length)],
+      });
+    }
+  }
+
+  function frame(t) {
+    const dt = last ? Math.min(0.05, (t - last) / 1000) : 0;
+    last = t;
+    ctx.fillStyle = "#05070f";
+    ctx.fillRect(0, 0, w, h);
+    for (const s of stars) {
+      s.y += s.spd * dt;
+      if (s.y > h + 2) {
+        s.y = -2;
+        s.x = Math.random() * w;
+      }
+      ctx.globalAlpha = s.a;
+      ctx.fillStyle = s.c;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    raf = requestAnimationFrame(frame);
+  }
+
+  resize();
+  window.addEventListener("resize", resize);
+  raf = requestAnimationFrame(frame);
+  return function stop() {
+    cancelAnimationFrame(raf);
+    window.removeEventListener("resize", resize);
+  };
+}
+
+// Start menu: title + Start + GitHub link, over a scrolling starfield. onNew() starts a match.
 export function showStartMenu(root, { onNew }) {
-  const wrap = overlay();
+  const wrap = overlay("background:#05070f;backdrop-filter:none;");
+  const sky = el("canvas", {
+    style: "position:absolute;inset:0;width:100%;height:100%;display:block;",
+  });
+  wrap.append(sky);
+
   const card = el("wa-card", {
     style:
-      "pointer-events:auto;max-width:440px;width:90%;text-align:center;--padding:2rem;",
+      "position:relative;z-index:1;pointer-events:auto;max-width:440px;width:90%;" +
+      "text-align:center;--padding:2rem;",
   });
   card.append(
     el("h1", {
@@ -55,16 +123,35 @@ export function showStartMenu(root, { onNew }) {
     variant: "brand",
     size: "large",
     style: "width:100%;",
-    html: '<i slot="start" class="fa-solid fa-seedling"></i>New Skirmish',
+    html: '<i slot="start" class="fa-solid fa-play"></i>Start',
   });
   start.addEventListener("click", () => {
-    wrap.remove();
+    cleanup();
     onNew();
   });
   card.append(start);
+
+  const gh = el("a", {
+    href: "https://github.com/evilchinesefood/Bloomspace",
+    target: "_blank",
+    rel: "noopener noreferrer",
+    style:
+      "display:inline-flex;align-items:center;gap:.45rem;margin-top:1.1rem;" +
+      "font:600 .85rem system-ui;color:#8aa0c8;text-decoration:none;opacity:.85;",
+    html: '<i class="fa-brands fa-github"></i> View on GitHub',
+  });
+  card.append(gh);
+
   wrap.append(card);
   root.append(wrap);
-  return () => wrap.remove();
+  // Start the starfield AFTER the canvas is in the DOM so it has a measured size.
+  const stopSky = startStarfield(sky);
+
+  function cleanup() {
+    stopSky();
+    wrap.remove();
+  }
+  return cleanup;
 }
 
 // Skirmish setup dialog: map size, asteroid count, # AI, difficulty. onConfirm(config).
