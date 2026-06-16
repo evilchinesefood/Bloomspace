@@ -3,6 +3,10 @@
 import { generateMap } from "./MapGen.js";
 import { updateSeedlings } from "./Seedlings.js";
 import { resolveCombat } from "./Combat.js";
+import { updateEconomy } from "./Economy.js";
+import { updateTrees } from "./Trees.js";
+
+export const STARTING_SEEDS = 10;
 
 // Owners:        -1 neutral, 0 human, 1..N AI
 // Seedling state: 0 ORBIT, 1 TRANSIT, 2 COMBAT, 3 DEAD
@@ -56,6 +60,10 @@ export function createWorld(config = {}) {
     asteroids: [],
     seed: makeSeedArrays(capacity),
   };
+  // Normalize every player to have a harvestable seeds resource (additive).
+  for (const p of world.players) {
+    if (p.seeds === undefined) p.seeds = STARTING_SEEDS;
+  }
   // Procedurally place asteroids + seed each player's home orbit (deterministic).
   generateMap(world, config, spawnSeedling);
   return world;
@@ -122,6 +130,8 @@ export function step(world, dt) {
   s.py.set(s.y.subarray(0, s.count));
   updateSeedlings(world, dt);
   resolveCombat(world, dt);
+  updateEconomy(world, dt);
+  updateTrees(world, dt);
   world.tick++;
 }
 
