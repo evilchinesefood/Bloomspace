@@ -24,6 +24,19 @@ function playerSeeds(world, id) {
   const p = world.players.find((p) => p.id === id);
   return p ? Math.floor(p.seeds ?? 0) : 0;
 }
+// Ships currently ORBITing a given body (state 0), split by your fighters/defenders + enemies.
+function orbitCounts(world, id, me) {
+  const s = world.seed;
+  let fMine = 0,
+    dMine = 0,
+    enemy = 0;
+  for (let i = 0; i < s.count; i++) {
+    if (s.home[i] !== id || s.state[i] !== 0) continue; // STATE.ORBIT === 0
+    if (s.owner[i] === me) s.kind[i] === 1 ? dMine++ : fMine++;
+    else enemy++;
+  }
+  return { fMine, dMine, enemy };
+}
 
 export function createHud(root, api) {
   // api: { getWorld, getSpeed, setSpeed, isPaused, setPaused, getSendFraction,
@@ -179,6 +192,20 @@ export function createHud(root, api) {
   panel.append(card);
   root.append(panel);
 
+  // Rally arming banner — an unmissable top-center cue while the player picks a rally target,
+  // so "set rally" is never a silent, invisible mode. Toggled in update() from isRallyMode().
+  const rallyBanner = el("div", {
+    style:
+      "position:absolute;top:70px;left:50%;transform:translateX(-50%);pointer-events:none;" +
+      "display:none;align-items:center;gap:.5rem;padding:.5rem .9rem;border-radius:999px;" +
+      "background:rgba(70,232,255,.16);border:1px solid rgba(70,232,255,.6);color:#bdecff;" +
+      "font:700 .85rem system-ui;white-space:nowrap;box-shadow:0 2px 18px rgba(70,232,255,.25);",
+    html:
+      '<i class="fa-solid fa-location-crosshairs"></i>' +
+      "Click a target asteroid to set the rally — Esc to cancel",
+  });
+  root.append(rallyBanner);
+
   const statBar = (label, color) => {
     const fill = el("div", {
       style: `height:100%;width:0%;background:${color};transition:width .2s;`,
@@ -226,6 +253,12 @@ export function createHud(root, api) {
   });
   const treesEl = el("div", {
     style: "margin-bottom:.8rem;font:500 .82rem system-ui;opacity:.85;",
+    textContent: "",
+  });
+  // Orbiting ships at the SELECTED body, split by type (fighters/defenders) + any enemies.
+  const orbitEl = el("div", {
+    style:
+      "margin-bottom:.8rem;font:600 .82rem system-ui;display:flex;gap:1rem;",
     textContent: "",
   });
 
@@ -284,6 +317,7 @@ export function createHud(root, api) {
     spBar.row,
     energyEl,
     treesEl,
+    orbitEl,
     sendSlider,
     plantSeedBtn,
     plantDefBtn,
@@ -315,6 +349,15 @@ export function createHud(root, api) {
       a.trees.length === 0
         ? "No trees."
         : `Trees: ${seedT} seedling, ${defT} defense`;
+
+    // Orbiting ships at this body (fighters / defenders / enemies). Selected-body only.
+    const oc = orbitCounts(world, id, HUMAN);
+    orbitEl.innerHTML =
+      `<span title="Your fighters" style="color:#cfe9ff"><i class="fa-solid fa-jet-fighter-up"></i> ${oc.fMine}</span>` +
+      `<span title="Your defenders" style="color:#9fffcf"><i class="fa-solid fa-shuttle-space"></i> ${oc.dMine}</span>` +
+      (oc.enemy
+        ? `<span title="Enemy ships" style="color:#ff6b6b"><i class="fa-solid fa-skull"></i> ${oc.enemy}</span>`
+        : "");
 
     const owned = a.owner === HUMAN;
     // Only your own rocks expose send/plant/rally; others are info-only.
@@ -357,12 +400,15 @@ export function createHud(root, api) {
     rocksStat.set(ownedRocks(world, HUMAN));
     seedlingsStat.set(mySeedlings(world, HUMAN));
     refreshSpeed();
+    rallyBanner.style.display =
+      api.isRallyMode && api.isRallyMode() ? "flex" : "none";
     renderPanel(world);
   }
 
   function destroy() {
     bar.remove();
     panel.remove();
+    rallyBanner.remove();
   }
 
   return { update, refreshSpeed, destroy, dom: { bar, panel } };

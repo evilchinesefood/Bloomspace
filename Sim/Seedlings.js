@@ -3,7 +3,9 @@
 import { STATE, OWNER_NEUTRAL } from "./World.js";
 
 const TAU = Math.PI * 2;
-const ORBIT_BASE = 1.2; // base angular speed (rad/sec)
+const ORBIT_BASE = 1.2; // max angular speed (rad/sec) — caps tiny rocks from whirling
+const ORBIT_LINEAR = 70; // target tangential speed (units/sec): keeps big-radius (planet)
+//                          orbits from sweeping fast. angular = ORBIT_LINEAR / orbitRadius.
 const TRANSIT_BASE = 120; // base linear speed (world units/sec)
 const ARRIVE_GAP = 24; // orbit gap added to target.radius for "arrived"
 
@@ -36,7 +38,11 @@ export function updateSeedlings(world, dt) {
     if (st === STATE.ORBIT) {
       const a = world.asteroids[s.home[i]];
       if (!a) continue;
-      let ang = s.orbitAngle[i] + dt * ORBIT_BASE * speedFactor(a);
+      // Angular speed derived from a target tangential speed so seedlings orbit big planets
+      // at the same visual pace as small asteroids (capped so tiny rocks don't whirl).
+      const r = s.orbitRadius[i] || 1;
+      const av = Math.min(ORBIT_BASE, ORBIT_LINEAR / r) * speedFactor(a);
+      let ang = s.orbitAngle[i] + dt * av;
       if (ang >= TAU) ang -= TAU;
       s.orbitAngle[i] = ang;
       s.x[i] = a.x + Math.cos(s.orbitAngle[i]) * s.orbitRadius[i];

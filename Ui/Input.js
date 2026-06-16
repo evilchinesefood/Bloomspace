@@ -52,16 +52,22 @@ export function createInput({
     if (!world || world.status !== "playing") return;
     const clicked = picking.asteroidAt(e.clientX, e.clientY, world);
 
-    // Rally-set mode: a single click on a target sets the selected rock's anchor (clicking
-    // the selected rock itself, or empty space, clears it). Doesn't select or arm a drag.
+    // Rally-set mode: a single click on a target asteroid sets the selected rock's anchor.
+    // Clicking the selected rock itself clears it. A click on EMPTY space is ignored (stays
+    // armed) so a near-miss never silently wipes the rally — the #1 "rally doesn't work"
+    // footgun. Doesn't select or arm a drag.
     if (rallyMode) {
       const src = selectedId();
       if (
-        src >= 0 &&
-        world.asteroids[src] &&
-        world.asteroids[src].owner === HUMAN
-      )
-        setRally(world, src, clicked, HUMAN);
+        src < 0 ||
+        !world.asteroids[src] ||
+        world.asteroids[src].owner !== HUMAN
+      ) {
+        rallyMode = false; // nothing of ours selected to rally — disarm
+        return;
+      }
+      if (clicked < 0) return; // missed an asteroid — keep armed, try again
+      setRally(world, src, clicked, HUMAN); // clicking src clears (toId === fromId)
       rallyMode = false;
       return;
     }
@@ -144,16 +150,23 @@ export function createInput({
     return plantTree(world, id, type, HUMAN);
   }
 
+  // Escape cancels an armed rally pick (the banner tells the player this is available).
+  function onKey(e) {
+    if (e.key === "Escape" && rallyMode) rallyMode = false;
+  }
+
   canvas.addEventListener("pointerdown", onDown);
   canvas.addEventListener("pointermove", onMove);
   canvas.addEventListener("pointerup", onUp);
   canvas.addEventListener("pointercancel", onUp);
+  window.addEventListener("keydown", onKey);
 
   function destroy() {
     canvas.removeEventListener("pointerdown", onDown);
     canvas.removeEventListener("pointermove", onMove);
     canvas.removeEventListener("pointerup", onUp);
     canvas.removeEventListener("pointercancel", onUp);
+    window.removeEventListener("keydown", onKey);
     picking.endDrag();
   }
 

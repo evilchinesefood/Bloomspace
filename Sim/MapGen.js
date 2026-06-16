@@ -132,23 +132,36 @@ function assignMoons(asteroids, homeSet, rng) {
   }
 }
 
-// Symmetric nearest-neighbor graph among NON-moon bodies, then a single edge from each moon
-// to its parent planet (moons are only reachable through their planet). Guaranteed connected.
+// Relative Neighborhood Graph among NON-moon bodies, then a single edge from each moon to its
+// parent planet (moons are only reachable through their planet). The RNG keeps edge i–j only
+// when no third body k is closer to BOTH i and j than they are to each other — a sparse,
+// organic network with natural chokepoints and no crossing lines. It's a superset of the
+// Euclidean MST, so the result is guaranteed connected.
 function buildNeighbors(asteroids) {
   const n = asteroids.length;
   const adj = asteroids.map(() => new Set());
   const isMoon = (i) => asteroids[i].moon;
-  for (let i = 0; i < n; i++) {
-    if (isMoon(i)) continue;
-    const order = [];
-    for (let j = 0; j < n; j++)
-      if (j !== i && !isMoon(j))
-        order.push([dist(asteroids[i], asteroids[j]), j]);
-    order.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-    for (let m = 0; m < Math.min(4, order.length); m++) {
-      const j = order[m][1];
-      adj[i].add(j);
-      adj[j].add(i);
+  const nm = [];
+  for (let i = 0; i < n; i++) if (!isMoon(i)) nm.push(i);
+  for (let a = 0; a < nm.length; a++) {
+    for (let b = a + 1; b < nm.length; b++) {
+      const i = nm[a];
+      const j = nm[b];
+      const dij = dist(asteroids[i], asteroids[j]);
+      let ok = true;
+      for (let c = 0; c < nm.length && ok; c++) {
+        if (c === a || c === b) continue;
+        const k = nm[c];
+        if (
+          dist(asteroids[i], asteroids[k]) < dij &&
+          dist(asteroids[j], asteroids[k]) < dij
+        )
+          ok = false;
+      }
+      if (ok) {
+        adj[i].add(j);
+        adj[j].add(i);
+      }
     }
   }
   for (let i = 0; i < n; i++)
