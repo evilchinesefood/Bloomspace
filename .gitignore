@@ -4,3 +4,9 @@ node_modules/
 *.local
 .DS_Store
 Thumbs.db
+
+# Internal planning/design docs — not part of the shipped game.
+docs/
+
+# Deploy script holds the live host target — kept local, never committed.
+Deploy.sh
