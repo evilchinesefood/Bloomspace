@@ -1,29 +1,77 @@
-// Render/AsteroidView.js — asteroids drawn as solid, dark rock bodies (one InstancedMesh)
-// with a bright owner-colored RIM ring (one InstancedMesh) so ownership reads clearly and
-// only the thin rim glows under bloom — the body stays dark so rocks don't bloom into
-// "suns". A dim per-rock stat "flower" ring (Energy/Strength/Speed) sits just outside, plus
-// a selection highlight and the LOD aggregate glow. Asteroid count is small (dozens) and
-// `id === index` (rocks are never removed), so per-rock ring meshes are fine.
+// Render/AsteroidView.js — asteroids drawn as shaded planet bodies (one InstancedMesh with
+// a shared radial-gradient "sphere" texture, tinted per-owner) plus a bright owner-colored
+// RIM ring so ownership reads clearly and only the thin rim glows under bloom. A selection
+// highlight ring + the LOD aggregate glow round it out. Asteroid count is small (dozens) and
+// `id === index` (rocks are never removed). Per-rock stats are NOT drawn here — they show in
+// the HUD panel when a rock is selected.
 import * as THREE from "three";
 import { ownerColor, ownerColorHex } from "./Palette.js";
 import { lodActive } from "./SeedlingView.js";
 
-const TAU = Math.PI * 2;
-
-// Stat flower ring: three thin concentric arcs, each a fraction (stat/100) of the circle.
-const RING_GAP = 7; // distance from rock edge to first stat arc
-const RING_SPACING = 5; // gap between the three stat arcs
-const RING_WIDTH = 2.5; // radial thickness of each arc
-const STAT_COLORS = [0xffd24b, 0xff6b6b, 0x5ad1ff]; // energy, strength, speed
-
-// Dark rock body: owner hue pulled hard toward neutral slate and darkened so its luminance
-// stays under the bloom threshold (it reads as a solid rock, not a glowing orb).
+// Dark rock body: owner hue pulled toward neutral slate and darkened so its lit center stays
+// under the bloom threshold (reads as a solid planet, not a glowing orb).
 const SLATE = new THREE.Color(0x2a3442);
 function rockColor(out, owner) {
   ownerColor(out, owner);
-  out.lerp(SLATE, 0.6);
-  out.multiplyScalar(0.7);
+  out.lerp(SLATE, 0.5);
+  out.multiplyScalar(0.8);
   return out;
+}
+
+// A grayscale "sphere" texture: bright spot offset to the top-left (lit from above), falling
+// off to a dark rim — multiplied by each rock's owner tint to fake a 3D planet on a flat disc.
+function makePlanetTexture() {
+  const s = 128;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = s;
+  const ctx = cv.getContext("2d");
+  const g = ctx.createRadialGradient(
+    s * 0.38,
+    s * 0.36,
+    s * 0.04,
+    s * 0.5,
+    s * 0.5,
+    s * 0.52,
+  );
+  g.addColorStop(0, "#e9edf3");
+  g.addColorStop(0.45, "#b4b9c2");
+  g.addColorStop(0.8, "#777c87");
+  g.addColorStop(1, "#3a3e46");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(s / 2, s / 2, s / 2, 0, Math.PI * 2);
+  ctx.fill();
+  // Faint surface mottling for a bit of planet texture.
+  ctx.globalAlpha = 0.12;
+  for (let i = 0; i < 14; i++) {
+    const a = (i * 2.39996) % (Math.PI * 2);
+    const rr = (0.12 + ((i * 7) % 30) / 100) * s * 0.42;
+    const px = s / 2 + Math.cos(a) * s * 0.22;
+    const py = s / 2 + Math.sin(a) * s * 0.22;
+    ctx.fillStyle = i % 2 ? "#2a2e36" : "#cfd4dd";
+    ctx.beginPath();
+    ctx.arc(px, py, rr, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  // Darken the rim for a spherical edge.
+  const rim = ctx.createRadialGradient(
+    s / 2,
+    s / 2,
+    s * 0.34,
+    s / 2,
+    s / 2,
+    s * 0.5,
+  );
+  rim.addColorStop(0, "rgba(0,0,0,0)");
+  rim.addColorStop(1, "rgba(0,0,0,0.5)");
+  ctx.fillStyle = rim;
+  ctx.beginPath();
+  ctx.arc(s / 2, s / 2, s / 2, 0, Math.PI * 2);
+  ctx.fill();
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 export function createAsteroidView(scene, world, camCtl) {
@@ -33,10 +81,10 @@ export function createAsteroidView(scene, world, camCtl) {
   const col = new THREE.Color();
   const lastOwner = new Int32Array(n).fill(-99);
 
-  // --- Bodies: one InstancedMesh, unit circle scaled to each radius (dark rock) ---
+  // --- Bodies: one InstancedMesh, unit circle scaled to each radius, shaded by the texture.
   const bodies = new THREE.InstancedMesh(
-    new THREE.CircleGeometry(1, 28),
-    new THREE.MeshBasicMaterial(),
+    new THREE.CircleGeometry(1, 36),
+    new THREE.MeshBasicMaterial({ map: makePlanetTexture() }),
     Math.max(1, n),
   );
   bodies.count = n;
@@ -49,7 +97,7 @@ export function createAsteroidView(scene, world, camCtl) {
 
   // --- Rims: a bright owner-colored ring hugging each rock edge (this is what glows) ---
   const rims = new THREE.InstancedMesh(
-    new THREE.RingGeometry(0.85, 1.0, 40),
+    new THREE.RingGeometry(0.9, 1.02, 44),
     new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
     Math.max(1, n),
   );
@@ -61,7 +109,6 @@ export function createAsteroidView(scene, world, camCtl) {
   );
   scene.add(rims);
 
-  // Bodies + rims share the same per-rock position/scale; only the radius differs.
   for (let i = 0; i < n; i++) {
     const a = rocks[i];
     dummy.position.set(a.x, a.y, -2);
@@ -97,34 +144,9 @@ export function createAsteroidView(scene, world, camCtl) {
   const glowCol = new THREE.Color();
   const orbitCount = new Int32Array(n);
 
-  // --- Stat flower rings: per-rock, three dim concentric arcs (static geometry) ---
-  const ringGroup = new THREE.Group();
-  scene.add(ringGroup);
-  for (let i = 0; i < n; i++) {
-    const a = rocks[i];
-    const stats = [a.energyStat, a.strengthStat, a.speedStat];
-    for (let r = 0; r < 3; r++) {
-      const inner = a.radius + RING_GAP + r * RING_SPACING;
-      const outer = inner + RING_WIDTH;
-      const frac = Math.max(0, Math.min(100, stats[r])) / 100;
-      if (frac <= 0) continue;
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(inner, outer, 48, 1, -Math.PI / 2, frac * TAU),
-        new THREE.MeshBasicMaterial({
-          color: STAT_COLORS[r],
-          transparent: true,
-          opacity: 0.5,
-          side: THREE.DoubleSide,
-        }),
-      );
-      ring.position.set(a.x, a.y, -1.5);
-      ringGroup.add(ring);
-    }
-  }
-
   // --- Selection highlight: a single ring we reposition over the selected rock ---
   const selRing = new THREE.Mesh(
-    new THREE.RingGeometry(1, 1.05, 64),
+    new THREE.RingGeometry(1, 1.04, 64),
     new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
@@ -144,7 +166,7 @@ export function createAsteroidView(scene, world, camCtl) {
       selRing.visible = false;
       return;
     }
-    const rr = a.radius + RING_GAP + 3 * RING_SPACING + 4;
+    const rr = a.radius + 9;
     selRing.scale.set(rr, rr, 1);
     selRing.position.set(a.x, a.y, -1);
     selRing.visible = true;
@@ -211,7 +233,6 @@ export function createAsteroidView(scene, world, camCtl) {
     bodies,
     rims,
     glow,
-    ringGroup,
     setSelected,
     clearSelected,
     selected: () => selectedId,

@@ -17,9 +17,9 @@ const BLOOM_SCALE = 0.5;
 
 // Bloom tuning — only bright things (seedlings, owner rims) glow; dark rocks/background
 // stay solid. A non-zero threshold is what keeps asteroids from blooming into "suns".
-const BLOOM_STRENGTH = 0.85;
+const BLOOM_STRENGTH = 0.55;
 const BLOOM_RADIUS = 0.4;
-const BLOOM_THRESHOLD = 0.42;
+const BLOOM_THRESHOLD = 0.45;
 
 const MIN_ZOOM = 0.82; // allow pulling back a little past fit-all to see the whole map
 const MAX_ZOOM = 8; // sane close-in limit
@@ -35,6 +35,39 @@ export function createScene(canvas, world) {
   renderer.setClearColor(0x05070f, 1);
 
   const scene = new THREE.Scene();
+
+  // --- Starfield background: dim points scattered across the world + a wide margin, so the
+  // backdrop reads as deep space at any zoom/pan. Two tiers for depth; kept dim so they
+  // don't bloom into big blobs. Cosmetic only (render-side Math.random is fine here).
+  function addStars() {
+    const margin = Math.max(world.width, world.height);
+    const spanX = world.width + 2 * margin;
+    const spanY = world.height + 2 * margin;
+    const tier = (count, size, opacity, hex) => {
+      const pos = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        pos[i * 3] = -margin + Math.random() * spanX;
+        pos[i * 3 + 1] = -margin + Math.random() * spanY;
+        pos[i * 3 + 2] = -20;
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      const m = new THREE.PointsMaterial({
+        color: hex,
+        size,
+        sizeAttenuation: false,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+      });
+      scene.add(new THREE.Points(g, m));
+    };
+    // Kept below the bloom threshold so they stay crisp dots (no blocky bloom halos).
+    tier(700, 1.3, 0.5, 0x7f8eac); // faint distant dust
+    tier(240, 1.8, 0.6, 0xa6b1c8); // medium stars
+    tier(40, 2.0, 0.55, 0x7d9ed8); // a few cool-blue accents
+  }
+  addStars();
 
   // Orthographic top-down camera framing the whole world.
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 1000);
