@@ -122,6 +122,28 @@ export function createAsteroidView(scene, world, camCtl) {
   bodies.instanceMatrix.needsUpdate = true;
   rims.instanceMatrix.needsUpdate = true;
 
+  // --- Neighbor network: faint static lines between connected asteroids (travel routes) ---
+  const edgePts = [];
+  for (let i = 0; i < n; i++) {
+    const nb = rocks[i].neighbors || [];
+    for (const j of nb) {
+      if (j <= i) continue; // draw each undirected edge once
+      edgePts.push(rocks[i].x, rocks[i].y, -2.2, rocks[j].x, rocks[j].y, -2.2);
+    }
+  }
+  const netGeo = new THREE.BufferGeometry();
+  netGeo.setAttribute("position", new THREE.Float32BufferAttribute(edgePts, 3));
+  const net = new THREE.LineSegments(
+    netGeo,
+    new THREE.LineBasicMaterial({
+      color: 0x2b3a5c,
+      transparent: true,
+      opacity: 0.4,
+    }),
+  );
+  net.frustumCulled = false;
+  scene.add(net);
+
   // --- LOD aggregate glow: one additive disc per rock, scaled/tinted by orbiter count ---
   const glow = new THREE.InstancedMesh(
     new THREE.CircleGeometry(1, 20),
@@ -159,11 +181,12 @@ export function createAsteroidView(scene, world, camCtl) {
   scene.add(selRing);
   let selectedId = -1;
 
-  // --- Rally indicator: a line from the selected rock to its anchor + a target marker ---
+  // --- Rally indicator: a polyline tracing the route from the selected rock to its anchor
+  //     (through the network) + a target marker. Buffer holds up to every asteroid once. ---
   const rallyGeo = new THREE.BufferGeometry();
   rallyGeo.setAttribute(
     "position",
-    new THREE.BufferAttribute(new Float32Array(6), 3),
+    new THREE.BufferAttribute(new Float32Array((n + 1) * 3), 3),
   );
   const rallyLine = new THREE.Line(
     rallyGeo,
@@ -235,13 +258,26 @@ export function createAsteroidView(scene, world, camCtl) {
     }
     const hex = ownerColorHex(rock.owner);
     const p = rallyGeo.attributes.position.array;
-    p[0] = rock.x;
-    p[1] = rock.y;
-    p[2] = 0;
-    p[3] = tgt.x;
-    p[4] = tgt.y;
-    p[5] = 0;
+    // Trace the multi-hop route along the nearest-neighbor network.
+    const nav = world.nav;
+    let idx = 0,
+      node = rock.id,
+      steps = 0;
+    p[idx++] = rock.x;
+    p[idx++] = rock.y;
+    p[idx++] = -1;
+    while (node !== tgt.id && steps < n) {
+      const hop = nav && nav[node] ? nav[node][tgt.id] : tgt.id;
+      if (hop < 0 || hop === node) break;
+      node = hop;
+      p[idx++] = rocks[node].x;
+      p[idx++] = rocks[node].y;
+      p[idx++] = -1;
+      steps++;
+    }
+    rallyGeo.setDrawRange(0, idx / 3);
     rallyGeo.attributes.position.needsUpdate = true;
+    rallyGeo.computeBoundingSphere();
     rallyLine.material.color.setHex(hex);
     rallyLine.visible = true;
     const fr = tgt.radius + 6;

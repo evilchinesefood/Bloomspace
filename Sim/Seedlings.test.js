@@ -55,13 +55,61 @@ test("send converts floor(count*fraction) eligible orbiters to transit", () => {
   const before = countOrbiting(w, home.id, 0);
   const sent = sendSeedlings(w, home.id, neutral.id, 0.5, 0);
   assert.equal(sent, Math.floor(before * 0.5));
-  // those many are now TRANSIT toward neutral
+  // those many are now TRANSIT with the neutral as their final destination (the next-hop
+  // `target` may be an intermediate waypoint on the nearest-neighbor route).
   let transit = 0;
   for (let i = 0; i < w.seed.count; i++) {
-    if (w.seed.state[i] === STATE.TRANSIT && w.seed.target[i] === neutral.id)
+    if (w.seed.state[i] === STATE.TRANSIT && w.seed.dest[i] === neutral.id)
       transit++;
   }
   assert.equal(transit, sent);
+});
+
+test("multi-hop: sending to a far asteroid routes through the neighbor network", () => {
+  const w = mk();
+  const home = w.asteroids.find((a) => a.owner === 0);
+  // find a NON-adjacent neutral destination (nav first-hop is an intermediate, not the dest)
+  let far = -1;
+  for (let t = 0; t < w.asteroids.length; t++) {
+    if (t === home.id || w.asteroids[t].owner !== OWNER_NEUTRAL) continue;
+    const hop = w.nav[home.id][t];
+    if (hop >= 0 && hop !== t) {
+      far = t;
+      break;
+    }
+  }
+  assert.notEqual(far, -1, "expected a non-adjacent neutral asteroid");
+  const sent = sendSeedlings(w, home.id, far, 1, 0);
+  assert.ok(sent >= 1);
+  // Sent seedlings aim at the FIRST HOP (a neighbor of home), not straight at the far rock.
+  for (let i = 0; i < w.seed.count; i++) {
+    if (w.seed.state[i] === STATE.TRANSIT && w.seed.dest[i] === far) {
+      assert.notEqual(
+        w.seed.target[i],
+        far,
+        "must not fly straight to a far rock",
+      );
+      assert.ok(
+        home.neighbors.includes(w.seed.target[i]),
+        "first hop is a neighbor of home",
+      );
+    }
+  }
+  // …and they eventually reach the far destination by hopping the network.
+  const arrived = stepUntil(
+    w,
+    () => {
+      for (let i = 0; i < w.seed.count; i++)
+        if (w.seed.owner[i] === 0 && w.seed.home[i] === far) return true;
+      return false;
+    },
+    4000,
+  );
+  assert.notEqual(
+    arrived,
+    -1,
+    "multi-hop seedlings never reached the destination",
+  );
 });
 
 test("send respects owner filter", () => {

@@ -9,6 +9,25 @@ const ARRIVE_GAP = 24; // orbit gap added to target.radius for "arrived"
 
 const speedFactor = (a) => 0.5 + (a ? a.speedStat : 50) / 100;
 
+// Next asteroid to fly to when routing from `fromId` toward final `destId`, using the
+// precomputed nearest-neighbor nav table. Falls back to going direct if no graph exists.
+function nextHop(world, fromId, destId) {
+  const nav = world.nav;
+  if (!nav || !nav[fromId]) return destId;
+  return nav[fromId][destId];
+}
+
+// Aim seedling i's velocity at `node` (its current waypoint) at transit speed.
+function aimAt(world, i, node) {
+  const s = world.seed;
+  const dx = node.x - s.x[i];
+  const dy = node.y - s.y[i];
+  const d = Math.hypot(dx, dy) || 1;
+  const speed = TRANSIT_BASE * speedFactor(world.asteroids[s.home[i]] || node);
+  s.vx[i] = (dx / d) * speed;
+  s.vy[i] = (dy / d) * speed;
+}
+
 // updateSeedlings — advance every live seedling one tick.
 export function updateSeedlings(world, dt) {
   const s = world.seed;
@@ -25,20 +44,32 @@ export function updateSeedlings(world, dt) {
     } else if (st === STATE.TRANSIT) {
       const t = world.asteroids[s.target[i]];
       if (!t) {
-        // Target vanished — park back into orbit around home.
+        // Waypoint vanished — park back into orbit around home.
         s.state[i] = STATE.ORBIT;
         s.target[i] = -1;
+        s.dest[i] = -1;
         continue;
       }
-      const home = world.asteroids[s.home[i]];
-      const speed = TRANSIT_BASE * speedFactor(home || t);
       const dx = t.x - s.x[i];
       const dy = t.y - s.y[i];
       const d = Math.hypot(dx, dy);
       if (d <= t.radius + ARRIVE_GAP) {
-        resolveArrival(world, i, t);
+        // Reached this waypoint. If it's the final destination, resolve (colonize/fight);
+        // otherwise advance to the next hop and keep flying along the network.
+        if (t.id === s.dest[i]) {
+          resolveArrival(world, i, t);
+        } else {
+          const hop = nextHop(world, t.id, s.dest[i]);
+          const node = world.asteroids[hop];
+          if (!node || hop === t.id) resolveArrival(world, i, t);
+          else {
+            s.target[i] = hop;
+            aimAt(world, i, node);
+          }
+        }
         continue;
       }
+      const speed = TRANSIT_BASE * speedFactor(world.asteroids[s.home[i]] || t);
       const move = Math.min(d, speed * dt);
       s.vx[i] = (dx / d) * speed;
       s.vy[i] = (dy / d) * speed;
@@ -54,6 +85,7 @@ function joinOrbit(world, i, target) {
   const s = world.seed;
   s.home[i] = target.id;
   s.target[i] = -1;
+  s.dest[i] = -1;
   s.state[i] = STATE.ORBIT;
   s.orbitRadius[i] = target.radius + 30 + world.rng() * 20;
   s.orbitAngle[i] = world.rng() * Math.PI * 2;
@@ -81,19 +113,19 @@ function resolveArrival(world, i, target) {
   }
 }
 
-// launchSeedling — put one seedling into TRANSIT toward a target asteroid. Shared by player
-// sends and tree-production rally routing.
-export function launchSeedling(world, i, target) {
+// launchSeedling — route seedling i toward final destination `dest`, flying along the
+// nearest-neighbor network (first hop now, the rest resolved waypoint by waypoint). Shared
+// by player sends and tree-production rally routing. No-op if already home or unreachable.
+export function launchSeedling(world, i, dest) {
   const s = world.seed;
-  s.target[i] = target.id;
+  if (!dest || dest.id === s.home[i]) return;
+  const hop = nextHop(world, s.home[i], dest.id);
+  const node = world.asteroids[hop];
+  if (!node) return;
+  s.dest[i] = dest.id;
+  s.target[i] = hop;
   s.state[i] = STATE.TRANSIT;
-  const dx = target.x - s.x[i];
-  const dy = target.y - s.y[i];
-  const d = Math.hypot(dx, dy) || 1;
-  const home = world.asteroids[s.home[i]];
-  const speed = TRANSIT_BASE * speedFactor(home || target);
-  s.vx[i] = (dx / d) * speed;
-  s.vy[i] = (dy / d) * speed;
+  aimAt(world, i, node);
 }
 
 // setRally — set or clear an asteroid's rally (anchor) point. Seedlings newly produced by a

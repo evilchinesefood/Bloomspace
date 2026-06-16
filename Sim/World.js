@@ -37,7 +37,8 @@ function makeSeedArrays(capacity) {
     vx: new Float32Array(capacity),
     vy: new Float32Array(capacity),
     home: new Int32Array(capacity),
-    target: new Int32Array(capacity),
+    target: new Int32Array(capacity), // next-hop asteroid (-1 if orbiting home)
+    dest: new Int32Array(capacity), // final destination asteroid for multi-hop routing
     owner: new Int8Array(capacity),
     energy: new Float32Array(capacity),
     strength: new Float32Array(capacity),
@@ -78,6 +79,7 @@ export function spawnSeedling(world, opts = {}) {
   const a = world.asteroids[opts.home ?? 0];
   s.home[i] = opts.home ?? 0;
   s.target[i] = -1;
+  s.dest[i] = -1;
   s.owner[i] = opts.owner ?? OWNER_NEUTRAL;
   s.orbitRadius[i] = opts.orbitRadius ?? 80;
   s.orbitAngle[i] = opts.orbitAngle ?? 0;
@@ -109,6 +111,7 @@ export function killSeedling(world, i) {
       "vy",
       "home",
       "target",
+      "dest",
       "owner",
       "energy",
       "strength",

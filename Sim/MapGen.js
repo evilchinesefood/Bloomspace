@@ -81,6 +81,85 @@ function pickHomes(asteroids, playerCount, rng) {
   return homes;
 }
 
+const NEIGHBORS_K = 4; // each asteroid links to its ~K nearest (symmetric)
+
+// Build a symmetric nearest-neighbor graph, then guarantee it's fully connected by adding
+// the shortest cross-component edges (so every asteroid is reachable for routing).
+function buildNeighbors(asteroids) {
+  const n = asteroids.length;
+  const adj = asteroids.map(() => new Set());
+  for (let i = 0; i < n; i++) {
+    const order = [];
+    for (let j = 0; j < n; j++)
+      if (j !== i) order.push([dist(asteroids[i], asteroids[j]), j]);
+    order.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    for (let m = 0; m < Math.min(NEIGHBORS_K, order.length); m++) {
+      const j = order[m][1];
+      adj[i].add(j);
+      adj[j].add(i);
+    }
+  }
+  // Union-find to detect + bridge disconnected components.
+  const parent = asteroids.map((_, i) => i);
+  const find = (x) => {
+    while (parent[x] !== x) x = parent[x] = parent[parent[x]];
+    return x;
+  };
+  const union = (a, b) => (parent[find(a)] = find(b));
+  for (let i = 0; i < n; i++) for (const j of adj[i]) union(i, j);
+  const componentCount = () => {
+    const roots = new Set();
+    for (let i = 0; i < n; i++) roots.add(find(i));
+    return roots.size;
+  };
+  while (componentCount() > 1) {
+    let bi = -1,
+      bj = -1,
+      bd = Infinity;
+    for (let i = 0; i < n; i++)
+      for (let j = i + 1; j < n; j++) {
+        if (find(i) === find(j)) continue;
+        const d = dist(asteroids[i], asteroids[j]);
+        if (d < bd) {
+          bd = d;
+          bi = i;
+          bj = j;
+        }
+      }
+    if (bi < 0) break;
+    adj[bi].add(bj);
+    adj[bj].add(bi);
+    union(bi, bj);
+  }
+  return adj.map((s) => Array.from(s).sort((a, b) => a - b));
+}
+
+// All-pairs first-hop table via BFS from each node: nav[s][t] = the neighbor of s that is
+// the first step on a shortest path to t (s for t===s, -1 if unreachable).
+function buildNav(asteroids, neighbors) {
+  const n = asteroids.length;
+  const nav = [];
+  for (let s = 0; s < n; s++) {
+    const firstHop = new Int32Array(n).fill(-1);
+    firstHop[s] = s;
+    const seen = new Uint8Array(n);
+    seen[s] = 1;
+    const queue = [s];
+    let qi = 0;
+    while (qi < queue.length) {
+      const cur = queue[qi++];
+      for (const nb of neighbors[cur]) {
+        if (seen[nb]) continue;
+        seen[nb] = 1;
+        firstHop[nb] = cur === s ? nb : firstHop[cur];
+        queue.push(nb);
+      }
+    }
+    nav.push(firstHop);
+  }
+  return nav;
+}
+
 // generateMap — populate world.asteroids and seed each player's home orbit.
 // Returns the world (mutated in place).
 export function generateMap(world, config = {}, spawnSeedling) {
@@ -88,6 +167,12 @@ export function generateMap(world, config = {}, spawnSeedling) {
   const asteroidCount = config.asteroidCount ?? 20;
   const asteroids = placeAsteroids(world, asteroidCount);
   world.asteroids = asteroids;
+
+  // Nearest-neighbor network + routing table (multi-hop travel runs along these links).
+  const neighbors = buildNeighbors(asteroids);
+  for (let i = 0; i < asteroids.length; i++)
+    asteroids[i].neighbors = neighbors[i];
+  world.nav = buildNav(asteroids, neighbors);
 
   const homes = pickHomes(asteroids, players.length, world.rng);
   for (let p = 0; p < homes.length; p++) {
