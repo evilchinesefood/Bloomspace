@@ -458,11 +458,10 @@ export function createAsteroidView(scene, world, camCtl) {
   selRing.position.z = -1;
   scene.add(selRing);
   let selectedId = -1;
+  let showInbound = false; // false = show selected body's OUTBOUND rally; true = INBOUND rallies
 
-  // --- Rally routes: PERSISTENT for every player-rallied rock (bright source→target line +
-  //     a target flag ring), so the player always sees where their rocks funnel — not only
-  //     while one is selected. This is the visible feedback the rally feature was missing. ---
-  const HUMAN = 0;
+  // --- Rally routes: shown ONLY for the selected body (outbound by default, or the inverse
+  //     "who rallies here" set when showInbound is toggled on). Bright line + flag ring. ---
   const rallySegGeo = new THREE.BufferGeometry();
   let rallySegPos = new Float32Array(0);
   let rallySegCap = -1;
@@ -575,51 +574,59 @@ export function createAsteroidView(scene, world, camCtl) {
   }
 
   function updateRally() {
-    // Every player rock with a rally set draws a straight source→target line + a target flag.
-    const rallied = [];
-    for (let i = 0; i < n; i++) {
-      const r = rocks[i];
-      if (
-        r.owner === HUMAN &&
-        r.rally != null &&
-        r.rally >= 0 &&
-        rocks[r.rally]
-      )
-        rallied.push(r);
-    }
-    if (rallied.length === 0) {
+    // Rally lines show ONLY for the selected body. Default = OUTBOUND (this body → its rally
+    // target). When showInbound is on = INVERSE (every body that rallies TO this one → here).
+    const sel = selectedId >= 0 ? rocks[selectedId] : null;
+    if (!sel) {
       rallyLine.visible = false;
       rallyFlags.count = 0;
       return;
     }
-    if (rallied.length * 2 !== rallySegCap) {
-      rallySegCap = rallied.length * 2;
-      rallySegPos = new Float32Array(rallied.length * 6);
+    // pairs: [fromRock, toRock, flagRock] — the flag marks the "other end".
+    const pairs = [];
+    if (showInbound) {
+      for (let i = 0; i < n; i++) {
+        const r = rocks[i];
+        if (r.rally === sel.id && r.id !== sel.id) pairs.push([r, sel, r]);
+      }
+    } else if (sel.rally >= 0 && rocks[sel.rally]) {
+      pairs.push([sel, rocks[sel.rally], rocks[sel.rally]]);
+    }
+    if (pairs.length === 0) {
+      rallyLine.visible = false;
+      rallyFlags.count = 0;
+      return;
+    }
+    if (pairs.length * 2 !== rallySegCap) {
+      rallySegCap = pairs.length * 2;
+      rallySegPos = new Float32Array(pairs.length * 6);
       rallySegGeo.setAttribute(
         "position",
         new THREE.BufferAttribute(rallySegPos, 3),
       );
     }
-    for (let k = 0; k < rallied.length; k++) {
-      const r = rallied[k];
-      const t = rocks[r.rally];
+    for (let k = 0; k < pairs.length; k++) {
+      const [a, b, flag] = pairs[k];
       const o = k * 6;
-      rallySegPos[o] = r.x;
-      rallySegPos[o + 1] = r.y;
+      rallySegPos[o] = a.x;
+      rallySegPos[o + 1] = a.y;
       rallySegPos[o + 2] = -1;
-      rallySegPos[o + 3] = t.x;
-      rallySegPos[o + 4] = t.y;
+      rallySegPos[o + 3] = b.x;
+      rallySegPos[o + 4] = b.y;
       rallySegPos[o + 5] = -1;
-      const fr = t.radius + 8;
-      dummy.position.set(t.x, t.y, -1);
+      const fr = flag.radius + 8;
+      dummy.position.set(flag.x, flag.y, -1);
       dummy.scale.set(fr, fr, 1);
       dummy.updateMatrix();
       rallyFlags.setMatrixAt(k, dummy.matrix);
     }
-    rallySegGeo.setDrawRange(0, rallied.length * 2);
+    // Inbound view tinted distinctly (gold) from the default outbound (teal).
+    rallyLine.material.color.setHex(showInbound ? 0xffcf5a : 0x46ffd2);
+    rallyFlags.material.color.setHex(showInbound ? 0xffcf5a : 0x46ffd2);
+    rallySegGeo.setDrawRange(0, pairs.length * 2);
     rallySegGeo.attributes.position.needsUpdate = true;
     rallyLine.visible = true;
-    rallyFlags.count = rallied.length;
+    rallyFlags.count = pairs.length;
     rallyFlags.instanceMatrix.needsUpdate = true;
   }
 
@@ -631,6 +638,14 @@ export function createAsteroidView(scene, world, camCtl) {
     setSelected,
     clearSelected,
     selected: () => selectedId,
+    toggleInbound: () => {
+      showInbound = !showInbound;
+      return showInbound;
+    },
+    setShowInbound: (on) => {
+      showInbound = !!on;
+    },
+    isInbound: () => showInbound,
     update,
   };
 }

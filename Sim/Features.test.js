@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { createWorld, OWNER_NEUTRAL } from "./World.js";
 import Sim from "./World.js";
 import { addConnection } from "./MapGen.js";
-import { setRally } from "./Seedlings.js";
+import { setRally, sendSeedlings } from "./Seedlings.js";
+
+const SLING = 4; // STATE.SLING
 
 const DT = 1 / 30;
 const TWO = [
@@ -145,6 +147,112 @@ test("orbiting bodies never clip neighbours across many ticks", () => {
       }
   }
   assert.ok(maxOverlap <= 0.5, `bodies clipped by ${maxOverlap.toFixed(1)}`);
+});
+
+// --- AI development --------------------------------------------------------
+test("Normal+ AI develops (plants trees); Easy never does", () => {
+  const treesFor = (dif) => {
+    const w = createWorld({
+      seed: 5,
+      asteroidCount: 20,
+      planetMin: 0,
+      planetMax: 1,
+      players: [
+        { id: 0, isAi: false, difficulty: 0 },
+        { id: 1, isAi: true, difficulty: dif },
+      ],
+    });
+    for (let t = 0; t < 3000; t++) Sim.step(w, DT);
+    let trees = 0;
+    for (const a of w.asteroids) if (a.owner === 1) trees += a.trees.length;
+    return trees;
+  };
+  assert.equal(treesFor(0), 0, "Easy should not plant trees");
+  assert.ok(treesFor(1) > 0, "Normal should develop (plant trees)");
+});
+
+// --- slingshot ------------------------------------------------------------
+// Farthest plain body reachable from `home` via 2+ hops (so the route has an intermediate).
+function multiHopTarget(w, home) {
+  let far = -1;
+  let bd = -1;
+  for (const a of w.asteroids) {
+    if (a.moon || a.binarySecondary || a.id === home.id || !a.habitable)
+      continue;
+    if (w.nav[home.id][a.id] === a.id) continue; // direct neighbour — no intermediate
+    const d = dist(home, a);
+    if (d > bd) {
+      bd = d;
+      far = a.id;
+    }
+  }
+  return far;
+}
+
+test("ships slingshot around intermediate bodies, then still reach the destination", () => {
+  const w = mk(1, 26);
+  const home = w.asteroids.find((a) => a.owner === 0);
+  const far = multiHopTarget(w, home);
+  assert.ok(far >= 0, "no multi-hop target");
+  sendSeedlings(w, home.id, far, 1, 0);
+  let sawSling = false;
+  for (let t = 0; t < 2400; t++) {
+    Sim.step(w, DT);
+    for (let i = 0; i < w.seed.count; i++)
+      if (w.seed.state[i] === SLING) sawSling = true;
+  }
+  assert.ok(sawSling, "no ship ever entered a slingshot orbit");
+  let arrived = 0;
+  const f = w.asteroids[far];
+  for (let i = 0; i < w.seed.count; i++)
+    if (
+      w.seed.owner[i] === 0 &&
+      dist({ x: w.seed.x[i], y: w.seed.y[i] }, f) < f.radius + 60
+    )
+      arrived++;
+  assert.ok(arrived > 0, "slinging ships never completed the journey");
+});
+
+test("a ship slinging past an enemy-held body fights it but does NOT capture it", () => {
+  const w = mk(1, 26);
+  const home = w.asteroids.find((a) => a.owner === 0);
+  const mid = (home.neighbors || []).find(
+    (id) =>
+      w.asteroids[id].kind === "asteroid" &&
+      !w.asteroids[id].moon &&
+      id !== home.id,
+  );
+  let dest = -1;
+  for (const a of w.asteroids) {
+    if (a.id === home.id || a.id === mid || a.moon || !a.habitable) continue;
+    if (w.nav[home.id][a.id] === mid) {
+      dest = a.id;
+      break;
+    }
+  }
+  assert.ok(mid >= 0 && dest >= 0, "couldn't route through an intermediate");
+  w.asteroids[mid].owner = 1;
+  for (let k = 0; k < 6; k++)
+    Sim.spawnSeedling(w, {
+      home: mid,
+      owner: 1,
+      orbitRadius: w.asteroids[mid].radius + 35,
+      orbitAngle: k,
+      strength: 80,
+      energy: 100,
+    });
+  const before = w.seed.count;
+  sendSeedlings(w, home.id, dest, 1, 0);
+  for (let t = 0; t < 900; t++) Sim.step(w, DT);
+  assert.ok(
+    w.seed.count < before,
+    "no casualties — slinging ships never fought the defenders",
+  );
+  assert.equal(
+    w.asteroids[mid].owner,
+    1,
+    "a passing/slinging ship wrongly captured the body",
+  );
 });
 
 test("binary pairs stay locked diametrically opposite their shared centre", () => {

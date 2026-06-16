@@ -11,9 +11,10 @@ import { updateAi, checkVictory } from "./Ai.js";
 export const STARTING_SEEDS = 10;
 
 // Owners:        -1 neutral, 0 human, 1..N AI
-// Seedling state: 0 ORBIT, 1 TRANSIT, 2 COMBAT, 3 DEAD
+// Seedling state: 0 ORBIT, 1 TRANSIT, 2 COMBAT, 3 DEAD, 4 SLING (partial slingshot orbit
+// around a body it's passing — fights any ships stationed there during the arc).
 export const OWNER_NEUTRAL = -1;
-export const STATE = { ORBIT: 0, TRANSIT: 1, COMBAT: 2, DEAD: 3 };
+export const STATE = { ORBIT: 0, TRANSIT: 1, COMBAT: 2, DEAD: 3, SLING: 4 };
 
 // Mulberry32 — small seeded deterministic PRNG -> [0,1).
 function makeRng(seed) {
@@ -47,6 +48,7 @@ function makeSeedArrays(capacity) {
     orbitRadius: new Float32Array(capacity),
     state: new Uint8Array(capacity),
     kind: new Uint8Array(capacity), // 0 fighter, 1 defender (defense-tree spawned)
+    slingRem: new Float32Array(capacity), // signed radians left in a slingshot arc (state SLING)
   };
 }
 
@@ -89,6 +91,7 @@ export function spawnSeedling(world, opts = {}) {
   s.energy[i] = opts.energy ?? 10;
   s.state[i] = STATE.ORBIT;
   s.kind[i] = opts.kind ?? 0;
+  s.slingRem[i] = 0;
   const cx = a ? a.x : 0;
   const cy = a ? a.y : 0;
   s.x[i] = cx + Math.cos(s.orbitAngle[i]) * s.orbitRadius[i];
@@ -122,6 +125,7 @@ export function killSeedling(world, i) {
       "orbitRadius",
       "state",
       "kind",
+      "slingRem",
     ]) {
       s[k][i] = s[k][last];
     }

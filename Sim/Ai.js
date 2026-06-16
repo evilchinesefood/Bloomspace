@@ -6,17 +6,42 @@ import { OWNER_NEUTRAL, STATE } from "./World.js";
 import { sendSeedlings } from "./Seedlings.js";
 import { plantTree } from "./Trees.js";
 
-// Difficulty knobs. Higher difficulty → decides more often, attacks more, plants trees.
-// dif 0 is deliberately passive (slow, expand-only, no trees) and weaker than dif 1+.
+// Difficulty knobs. 0 Easy · 1 Normal · 2 Hard · 3 Brutal. Higher = decides faster, commits
+// more orbiters, and presses attacks harder. Normal and up DEVELOP (plant trees); Easy never
+// does. Tuned so each step is clearly harder, Normal expands-and-builds before raiding (it no
+// longer rushes attacks with no economy), Hard sits between Normal and Brutal, and Brutal is
+// the relentless rusher (the old Hard's aggression, dialled up).
+//   interval  — seconds between decisions (lower = acts more often)
+//   fraction  — share of orbiters committed per command
+//   attack    — willing to attack enemy-held rocks at all
+//   plant     — willing to plant growth/defense trees (develops an economy)
+//   aggression— bias toward attacking over neutral expansion
+const KNOBS = [
+  {
+    interval: 3.4,
+    fraction: 0.4,
+    attack: false,
+    plant: false,
+    aggression: 0.0,
+  },
+  { interval: 2.3, fraction: 0.52, attack: true, plant: true, aggression: 0.3 },
+  {
+    interval: 1.5,
+    fraction: 0.64,
+    attack: true,
+    plant: true,
+    aggression: 0.55,
+  },
+  {
+    interval: 0.9,
+    fraction: 0.78,
+    attack: true,
+    plant: true,
+    aggression: 0.82,
+  },
+];
 function knobs(difficulty) {
-  const d = Math.max(0, difficulty | 0);
-  return {
-    interval: Math.max(0.6, 3.5 - d * 0.9), // seconds between decisions
-    fraction: Math.min(0.85, 0.4 + d * 0.12), // share of orbiters sent per command
-    attack: d >= 1, // willing to attack enemy rocks
-    plant: d >= 2, // willing to plant growth/defense trees
-    aggression: Math.min(0.9, 0.25 + d * 0.2), // bias attack over expand
-  };
+  return KNOBS[Math.max(0, Math.min(3, difficulty | 0))];
 }
 
 // Count ORBITing seedlings of `owner` home'd at `rockId` — the pool a send can draw from.

@@ -110,6 +110,9 @@ export function createApp(root) {
       isRallyMode: () => (game ? game.input.isRallyMode() : false),
       setConnectMode: (on) => game && game.input.setConnectMode(on),
       isConnectMode: () => (game ? game.input.isConnectMode() : false),
+      toggleInbound: () =>
+        game ? game.views.asteroids.toggleInbound() : false,
+      isInbound: () => (game ? game.views.asteroids.isInbound() : false),
       // Quality settings: read/write the session-persistent state + apply live.
       getQuality: () => quality,
       setBloom: (on) => {

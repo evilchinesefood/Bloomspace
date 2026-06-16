@@ -335,6 +335,15 @@ export function createHud(root, api) {
     api.setConnectMode(!api.isConnectMode()),
   );
 
+  // Inbound-rally view (toggle, also bound to the 'i' key): shows which OTHER bodies have
+  // their rally set TO the selected body, instead of this body's own outbound rally.
+  const inboundBtn = el("wa-button", {
+    size: "small",
+    style: "width:100%;margin-top:.4rem;",
+    html: '<i slot="start" class="fa-solid fa-arrow-right-to-bracket"></i>Show rallies to here',
+  });
+  inboundBtn.addEventListener("click", () => api.toggleInbound());
+
   const hint = el("div", {
     style: "margin-top:.6rem;font:500 .76rem system-ui;opacity:.6;",
     textContent: "Drag from this asteroid to a target to send seedlings.",
@@ -354,6 +363,7 @@ export function createHud(root, api) {
     plantDefBtn,
     rallyBtn,
     connectBtn,
+    inboundBtn,
     hint,
   );
 
@@ -445,6 +455,17 @@ export function createHud(root, api) {
           ? "Click another body you control to build a permanent link."
           : "Drag from this asteroid to a target to send seedlings.";
     }
+
+    // Inbound-rally toggle works for ANY selected body (e.g. inspect which of your rocks
+    // rally onto an enemy target). Always visible while a body is selected.
+    const inbound = api.isInbound && api.isInbound();
+    setProp(inboundBtn, "variant", inbound ? "brand" : "neutral");
+    setHtml(
+      inboundBtn,
+      inbound
+        ? '<i slot="start" class="fa-solid fa-arrow-right-to-bracket"></i>Hide inbound rallies'
+        : '<i slot="start" class="fa-solid fa-arrow-right-to-bracket"></i>Show rallies to here',
+    );
   }
 
   // update — called each frame: refresh top-bar tallies + the open panel.
@@ -461,11 +482,22 @@ export function createHud(root, api) {
     renderPanel(world);
   }
 
+  // 'i' key toggles the inbound-rally view (when a body is selected). Ignore while typing in
+  // a form control.
+  function onKey(e) {
+    if (e.key !== "i" && e.key !== "I") return;
+    const tag = (e.target && e.target.tagName) || "";
+    if (/^(INPUT|TEXTAREA)$/.test(tag) || tag.startsWith("WA-")) return;
+    if (api.getSelected && api.getSelected() >= 0) api.toggleInbound();
+  }
+  window.addEventListener("keydown", onKey);
+
   function destroy() {
     bar.remove();
     panel.remove();
     rallyBanner.remove();
     connectBanner.remove();
+    window.removeEventListener("keydown", onKey);
   }
 
   return { update, refreshSpeed, destroy, dom: { bar, panel } };

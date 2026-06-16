@@ -8,6 +8,7 @@ const ORBIT_LINEAR = 70; // target tangential speed (units/sec): keeps big-radiu
 //                          orbits from sweeping fast. angular = ORBIT_LINEAR / orbitRadius.
 const TRANSIT_BASE = 120; // base linear speed (world units/sec)
 const ARRIVE_GAP = 24; // orbit gap added to target.radius for "arrived"
+const SLING_ARC = 0.7 * TAU; // slingshot: sweep ~70% around a passed body before breaking off
 
 const speedFactor = (a) => 0.5 + (a ? a.speedStat : 50) / 100;
 
@@ -60,19 +61,11 @@ export function updateSeedlings(world, dt) {
       const dy = t.y - s.y[i];
       const d = Math.hypot(dx, dy);
       if (d <= t.radius + ARRIVE_GAP) {
-        // Reached this waypoint. If it's the final destination, resolve (colonize/fight);
-        // otherwise advance to the next hop and keep flying along the network.
-        if (t.id === s.dest[i]) {
-          resolveArrival(world, i, t);
-        } else {
-          const hop = nextHop(world, t.id, s.dest[i]);
-          const node = world.asteroids[hop];
-          if (!node || hop === t.id) resolveArrival(world, i, t);
-          else {
-            s.target[i] = hop;
-            aimAt(world, i, node);
-          }
-        }
+        // Reached this waypoint. The FINAL destination resolves (colonize/fight); an
+        // intermediate body is slung around (~70%) before continuing — fighting anything
+        // stationed there during the arc (Combat treats SLING ships as engaging that body).
+        if (t.id === s.dest[i]) resolveArrival(world, i, t);
+        else enterSling(world, i, t);
         continue;
       }
       const speed = TRANSIT_BASE * speedFactor(world.asteroids[s.home[i]] || t);
@@ -81,8 +74,29 @@ export function updateSeedlings(world, dt) {
       s.vy[i] = (dy / d) * speed;
       s.x[i] += (dx / d) * move;
       s.y[i] += (dy / d) * move;
+    } else if (st === STATE.SLING) {
+      const t = world.asteroids[s.target[i]];
+      if (!t) {
+        s.state[i] = STATE.TRANSIT;
+        s.slingRem[i] = 0;
+        continue;
+      }
+      const rad = s.orbitRadius[i] || t.radius + ARRIVE_GAP;
+      const dir = s.slingRem[i] >= 0 ? 1 : -1;
+      const speed = TRANSIT_BASE * speedFactor(world.asteroids[s.home[i]] || t);
+      let dAng = (speed / Math.max(1, rad)) * dt;
+      if (dAng > Math.abs(s.slingRem[i])) dAng = Math.abs(s.slingRem[i]);
+      s.orbitAngle[i] += dir * dAng;
+      s.slingRem[i] -= dir * dAng; // shrink the signed remainder toward 0
+      s.x[i] = t.x + Math.cos(s.orbitAngle[i]) * rad;
+      s.y[i] = t.y + Math.sin(s.orbitAngle[i]) * rad;
+      // tangential velocity → ship orients along its curve
+      s.vx[i] = -Math.sin(s.orbitAngle[i]) * dir * speed;
+      s.vy[i] = Math.cos(s.orbitAngle[i]) * dir * speed;
+      if (Math.abs(s.slingRem[i]) <= 1e-4) breakOff(world, i, t);
+      continue;
     }
-    // COMBAT / DEAD: left for T4; no-op here so nothing breaks.
+    // COMBAT / DEAD: handled in Combat; no movement here.
   }
 }
 
@@ -123,6 +137,42 @@ function resolveArrival(world, i, target) {
     // are gone (Combat.flipOwnership), never here. Attackers that lose the fight die.
     joinOrbit(world, i, target);
   }
+}
+
+// enterSling — begin a partial slingshot orbit around intermediate waypoint `t`. The ship
+// keeps its final dest; it swings ~70% of the way around t (in the direction it's already
+// curving) then breaks off toward the next hop. Combat makes it fight ships stationed at t.
+function enterSling(world, i, t) {
+  const s = world.seed;
+  const dx = s.x[i] - t.x;
+  const dy = s.y[i] - t.y;
+  const rad = Math.hypot(dx, dy) || t.radius + ARRIVE_GAP;
+  s.orbitRadius[i] = rad;
+  s.orbitAngle[i] = Math.atan2(dy, dx);
+  // Continue rotating the way the incoming velocity curves around t (sign of r × v).
+  const dir = dx * s.vy[i] - dy * s.vx[i] >= 0 ? 1 : -1;
+  s.slingRem[i] = dir * SLING_ARC;
+  s.state[i] = STATE.SLING;
+  s.target[i] = t.id; // the sling center (already t)
+}
+
+// breakOff — slingshot complete: head to the next hop (or resolve if t was the destination).
+function breakOff(world, i, t) {
+  const s = world.seed;
+  s.slingRem[i] = 0;
+  if (t.id === s.dest[i]) {
+    resolveArrival(world, i, t);
+    return;
+  }
+  const hop = nextHop(world, t.id, s.dest[i]);
+  const node = world.asteroids[hop];
+  if (!node || hop === t.id) {
+    resolveArrival(world, i, t);
+    return;
+  }
+  s.target[i] = hop;
+  s.state[i] = STATE.TRANSIT;
+  aimAt(world, i, node);
 }
 
 // launchSeedling — route seedling i toward final destination `dest`, flying along the

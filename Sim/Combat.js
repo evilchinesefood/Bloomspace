@@ -107,14 +107,16 @@ export function resolveCombat(world, dt) {
     }
   }
 
-  // Same-home engagement: ANY two enemy ships orbiting the same rock fight every tick,
-  // regardless of orbit distance — there's never a peaceful stand-off on a shared rock.
-  // (Transit ships are en route, not "on" a rock; proximity covers their fly-bys.)
+  // Same-body engagement: ANY two enemy ships sharing a rock fight every tick, regardless of
+  // orbit distance — no peaceful stand-off on a shared rock. A SLING ship (mid slingshot
+  // around a body it's passing) counts as "on" that body (its target), so it trades fire with
+  // anything stationed there for the duration of the arc. Pure TRANSIT fly-bys use proximity.
+  const bodyOf = (i) => (s.state[i] === STATE.SLING ? s.target[i] : s.home[i]);
   strAt.fill(0, 0, A * MAXO);
   totAt.fill(0, 0, A);
   for (let i = 0; i < s.count; i++) {
     if (s.state[i] === STATE.TRANSIT) continue;
-    const h = s.home[i];
+    const h = bodyOf(i);
     const o = s.owner[i];
     if (h < 0 || h >= A || o < 0 || o >= MAXO) continue;
     strAt[h * MAXO + o] += s.strength[i];
@@ -122,7 +124,7 @@ export function resolveCombat(world, dt) {
   }
   for (let i = 0; i < s.count; i++) {
     if (s.state[i] === STATE.TRANSIT) continue;
-    const h = s.home[i];
+    const h = bodyOf(i);
     const o = s.owner[i];
     if (h < 0 || h >= A || o < 0 || o >= MAXO) continue;
     const enemyStr = totAt[h] - strAt[h * MAXO + o];
@@ -136,7 +138,7 @@ export function resolveCombat(world, dt) {
   // Don't kill mid-scan — compaction below swap-removes the DEAD in a safe descending pass.
   for (let i = 0; i < s.count; i++) {
     if (s.energy[i] <= 0) s.state[i] = STATE.DEAD;
-    else if (s.state[i] !== STATE.TRANSIT)
+    else if (s.state[i] !== STATE.TRANSIT && s.state[i] !== STATE.SLING)
       s.state[i] = engaged[i] ? STATE.COMBAT : STATE.ORBIT;
   }
 
@@ -170,6 +172,9 @@ function flipOwnership(world) {
     let ownerPresent = false;
     let rival = -2; // -2 = none yet, -3 = multiple rivals
     for (let i = 0; i < s.count; i++) {
+      // Only ships that STOP at a rock hold/capture it — passing TRANSIT and slingshotting
+      // SLING ships fight but never flip ownership just by flying through the hold-zone.
+      if (s.state[i] === STATE.TRANSIT || s.state[i] === STATE.SLING) continue;
       const dx = s.x[i] - rock.x;
       const dy = s.y[i] - rock.y;
       if (dx * dx + dy * dy > reach2) continue;
