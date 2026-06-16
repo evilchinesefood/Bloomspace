@@ -1,6 +1,7 @@
 // Sim/World.js — game state + data contract. NO three.js import (must run headless).
-// This is the T1 stub: it declares the SoA shape from the plan and a proof-of-life
-// stepper. T2 fills in MapGen, sending, colonization, etc.
+// Declares the SoA shape from the plan; orchestrates the per-tick sim.
+import { generateMap } from "./MapGen.js";
+import { updateSeedlings } from "./Seedlings.js";
 
 // Owners:        -1 neutral, 0 human, 1..N AI
 // Seedling state: 0 ORBIT, 1 TRANSIT, 2 COMBAT, 3 DEAD
@@ -54,27 +55,8 @@ export function createWorld(config = {}) {
     asteroids: [],
     seed: makeSeedArrays(capacity),
   };
-  // T1 proof-of-life: one asteroid at center, one seedling orbiting it.
-  world.asteroids.push({
-    id: 0,
-    x: width / 2,
-    y: height / 2,
-    radius: 40,
-    energyStat: 60,
-    strengthStat: 50,
-    speedStat: 50,
-    owner: 0,
-    energy: 100,
-    trees: [],
-  });
-  spawnSeedling(world, {
-    home: 0,
-    owner: 0,
-    orbitRadius: 90,
-    orbitAngle: 0,
-    strength: 50,
-    energy: 10,
-  });
+  // Procedurally place asteroids + seed each player's home orbit (deterministic).
+  generateMap(world, config, spawnSeedling);
   return world;
 }
 
@@ -129,21 +111,15 @@ export function killSeedling(world, i) {
   }
 }
 
-// step — advance exactly one fixed tick. T1 proof-of-life: orbit every seedling
-// around its home asteroid. T2 replaces this with real seedling/economy/combat logic.
+// step — advance exactly one fixed tick. Orchestrator: snapshot positions for render
+// interpolation, run the sim systems, advance the tick. Later tasks add Combat/Economy/
+// Trees/Ai calls between updateSeedlings and tick++.
 export function step(world, dt) {
   const s = world.seed;
   // Snapshot positions for render interpolation.
   s.px.set(s.x.subarray(0, s.count));
   s.py.set(s.y.subarray(0, s.count));
-  for (let i = 0; i < s.count; i++) {
-    if (s.state[i] === STATE.DEAD) continue;
-    const a = world.asteroids[s.home[i]];
-    if (!a) continue;
-    s.orbitAngle[i] += dt * 1.2; // radians/sec
-    s.x[i] = a.x + Math.cos(s.orbitAngle[i]) * s.orbitRadius[i];
-    s.y[i] = a.y + Math.sin(s.orbitAngle[i]) * s.orbitRadius[i];
-  }
+  updateSeedlings(world, dt);
   world.tick++;
 }
 
