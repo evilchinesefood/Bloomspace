@@ -5,6 +5,7 @@ import { updateSeedlings } from "./Seedlings.js";
 import { resolveCombat } from "./Combat.js";
 import { updateEconomy } from "./Economy.js";
 import { updateTrees } from "./Trees.js";
+import { updateAi, checkVictory } from "./Ai.js";
 
 export const STARTING_SEEDS = 10;
 
@@ -128,10 +129,12 @@ export function step(world, dt) {
   // Snapshot positions for render interpolation.
   s.px.set(s.x.subarray(0, s.count));
   s.py.set(s.y.subarray(0, s.count));
+  updateAi(world, dt); // AI issues commands that take effect through the pipeline below
   updateSeedlings(world, dt);
   resolveCombat(world, dt);
   updateEconomy(world, dt);
   updateTrees(world, dt);
+  checkVictory(world);
   world.tick++;
 }
 

@@ -138,7 +138,18 @@ test("enemy arrival is governed by combat, not instant colonization", () => {
   // captured on mere contact: combat must wipe the defenders first (Combat.flipOwnership).
   // This is robust to who ultimately wins — it only checks the arrival moment + that the
   // fight actually produces casualties (combat is wired into step()).
-  const w = mk();
+  // Use a passive opponent so the test isolates combat: an active AI defender would
+  // expand/produce and inflate the population, masking the casualty signal.
+  const w = createWorld({
+    seed: 7,
+    asteroidCount: 16,
+    players: [
+      { id: 0, isAi: false, difficulty: 0 },
+      { id: 1, isAi: false, difficulty: 1 },
+    ],
+    width: 1000,
+    height: 1000,
+  });
   const home0 = w.asteroids.find((a) => a.owner === 0);
   const home1 = w.asteroids.find((a) => a.owner === 1);
   const startCount = w.seed.count;
