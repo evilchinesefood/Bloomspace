@@ -160,6 +160,15 @@ export function showStartMenu(root, { onNew }) {
   });
   card.append(gh);
 
+  // Build stamp — so the player can confirm they're on the latest deploy (rules out a stale
+  // service-worker cache). Keep in lockstep with Sw.js CACHE_VERSION.
+  card.append(
+    el("div", {
+      style: "margin-top:.8rem;font:600 .72rem system-ui;opacity:.4;",
+      textContent: "build v19",
+    }),
+  );
+
   wrap.append(card);
   root.append(wrap);
   // Start the starfield AFTER the canvas is in the DOM so it has a measured size.

@@ -9,6 +9,20 @@ import { CONNECT_ENERGY_COST } from "../Sim/MapGen.js";
 
 const hex = (n) => "#" + (n >>> 0).toString(16).padStart(6, "0").slice(-6);
 
+// Guarded DOM writes: only touch a node when the value actually changes. Rewriting a
+// <wa-button>'s innerHTML EVERY frame quietly rebuilds its child nodes mid-interaction, which
+// can swallow a real (down→up) mouse click in some browsers — the original press target gets
+// detached before the click resolves. Setting it only on change fixes that.
+function setHtml(el, html) {
+  if (el._html !== html) {
+    el._html = html;
+    el.innerHTML = html;
+  }
+}
+function setProp(el, key, val) {
+  if (el[key] !== val) el[key] = val;
+}
+
 function ownedRocks(world, owner) {
   let n = 0;
   for (const a of world.asteroids) if (a.owner === owner) n++;
@@ -389,8 +403,8 @@ export function createHud(root, api) {
       const seeds = playerSeeds(world, HUMAN);
       const affordable =
         seeds >= TREE_SEED_COST && a.energy >= TREE_ENERGY_COST;
-      plantSeedBtn.disabled = !affordable;
-      plantDefBtn.disabled = !affordable;
+      setProp(plantSeedBtn, "disabled", !affordable);
+      setProp(plantDefBtn, "disabled", !affordable);
       const why = affordable
         ? `Costs ${TREE_SEED_COST} seeds + ${TREE_ENERGY_COST} energy`
         : `Need ${TREE_SEED_COST} seeds + ${TREE_ENERGY_COST} energy`;
@@ -398,19 +412,29 @@ export function createHud(root, api) {
       plantDefBtn.title = why;
 
       const arming = api.isRallyMode();
-      rallyBtn.variant = arming ? "brand" : "neutral";
+      setProp(rallyBtn, "variant", arming ? "brand" : "neutral");
       const rallySet = a.rally != null && a.rally >= 0;
-      rallyBtn.innerHTML = arming
-        ? '<i slot="start" class="fa-solid fa-xmark"></i>Cancel rally pick'
-        : rallySet
-          ? `<i slot="start" class="fa-solid fa-location-crosshairs"></i>Rally → #${a.rally} (change)`
-          : '<i slot="start" class="fa-solid fa-location-crosshairs"></i>Set Rally Point';
+      setHtml(
+        rallyBtn,
+        arming
+          ? '<i slot="start" class="fa-solid fa-xmark"></i>Cancel rally pick'
+          : rallySet
+            ? `<i slot="start" class="fa-solid fa-location-crosshairs"></i>Rally → #${a.rally} (change)`
+            : '<i slot="start" class="fa-solid fa-location-crosshairs"></i>Set Rally Point',
+      );
       const connecting = api.isConnectMode && api.isConnectMode();
-      connectBtn.variant = connecting ? "brand" : "neutral";
-      connectBtn.disabled = !connecting && a.energy < CONNECT_ENERGY_COST;
-      connectBtn.innerHTML = connecting
-        ? '<i slot="start" class="fa-solid fa-xmark"></i>Cancel connection'
-        : `<i slot="start" class="fa-solid fa-link"></i>Build Connection (−${CONNECT_ENERGY_COST}⚡)`;
+      setProp(connectBtn, "variant", connecting ? "brand" : "neutral");
+      setProp(
+        connectBtn,
+        "disabled",
+        !connecting && a.energy < CONNECT_ENERGY_COST,
+      );
+      setHtml(
+        connectBtn,
+        connecting
+          ? '<i slot="start" class="fa-solid fa-xmark"></i>Cancel connection'
+          : `<i slot="start" class="fa-solid fa-link"></i>Build Connection (−${CONNECT_ENERGY_COST}⚡)`,
+      );
       connectBtn.title =
         a.energy < CONNECT_ENERGY_COST
           ? `Needs ${CONNECT_ENERGY_COST} stored energy on this body`
