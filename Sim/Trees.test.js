@@ -16,7 +16,7 @@ const DT = 1 / 30;
 function world(seed = 1) {
   return createWorld({
     seed,
-    asteroidCount: 6,
+    asteroidCount: 14,
     players: [{ id: 0, isAi: false, difficulty: 0 }],
     width: 4000,
     height: 4000,
@@ -25,8 +25,11 @@ function world(seed = 1) {
 function ownedRock(w) {
   return w.asteroids.find((a) => a.owner === 0);
 }
+// A neutral, colonizable body: a plain habitable asteroid (skip the non-habitable star/moons).
 function neutralRock(w) {
-  return w.asteroids.find((a) => a.owner === OWNER_NEUTRAL);
+  return w.asteroids.find(
+    (a) => a.owner === OWNER_NEUTRAL && a.kind === "asteroid" && !a.moon,
+  );
 }
 function ownerSeedlings(w, owner) {
   const s = w.seed;

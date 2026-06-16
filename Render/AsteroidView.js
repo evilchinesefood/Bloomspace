@@ -177,6 +177,79 @@ function terranTexture(rnd) {
   );
 }
 
+// A blazing star: white-hot core fading through gold to a soft transparent edge (it blooms).
+function starTexture(rnd) {
+  const h = 38 + rnd() * 18; // gold→amber
+  return makeTex(
+    (ctx, s) => {
+      const g = ctx.createRadialGradient(
+        s / 2,
+        s / 2,
+        s * 0.04,
+        s / 2,
+        s / 2,
+        s / 2,
+      );
+      g.addColorStop(0, "#ffffff");
+      g.addColorStop(0.4, hsl(h, 100, 75));
+      g.addColorStop(0.75, hsl(h - 12, 95, 55));
+      g.addColorStop(1, hsl(h - 18, 90, 38));
+      ctx.fillStyle = g;
+      disc(ctx, s);
+      ctx.fill();
+    },
+    ["#ffffff", hsl(h, 100, 72), hsl(h - 12, 95, 52), hsl(h - 20, 90, 36)],
+  );
+}
+
+// A black hole: dark void core ringed by a bright accretion glow (the ring blooms).
+function blackholeTexture() {
+  const s = 128;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = s;
+  const ctx = cv.getContext("2d");
+  const g = ctx.createRadialGradient(
+    s / 2,
+    s / 2,
+    s * 0.18,
+    s / 2,
+    s / 2,
+    s / 2,
+  );
+  g.addColorStop(0, "#000000");
+  g.addColorStop(0.5, "#05060a");
+  g.addColorStop(0.74, "#0a0b12");
+  g.addColorStop(0.82, "#7a5cff");
+  g.addColorStop(0.9, "#ff8a3d");
+  g.addColorStop(1, "rgba(255,150,80,0)");
+  ctx.fillStyle = g;
+  disc(ctx, s);
+  ctx.fill();
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+// Soft radial falloff (white core → transparent) for additive glow halos. Cached module-wide.
+let _glowTex = null;
+function radialGlowTexture() {
+  if (_glowTex) return _glowTex;
+  const s = 128;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = s;
+  const ctx = cv.getContext("2d");
+  const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  g.addColorStop(0, "rgba(255,255,255,1)");
+  g.addColorStop(0.5, "rgba(255,255,255,0.35)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g;
+  disc(ctx, s);
+  ctx.fill();
+  _glowTex = new THREE.CanvasTexture(cv);
+  _glowTex.colorSpace = THREE.SRGBColorSpace;
+  return _glowTex;
+}
+
 export function createAsteroidView(scene, world, camCtl) {
   const rocks = world.asteroids;
   const n = rocks.length;
@@ -184,13 +257,16 @@ export function createAsteroidView(scene, world, camCtl) {
   const col = new THREE.Color();
   const lastOwner = new Int32Array(n).fill(-99);
 
-  const moonIds = [];
-  for (let i = 0; i < n; i++) if (rocks[i].moon) moonIds.push(i);
-  const hasMoons = moonIds.length > 0;
+  // Bodies that move each frame (moons, asteroid satellites, binary members) need their
+  // instanced body/rim + the network edges rewritten every tick.
+  const movingIds = [];
+  for (let i = 0; i < n; i++) if (rocks[i].orbiting) movingIds.push(i);
+  const hasMoving = movingIds.length > 0;
 
-  // --- Bodies: asteroids + moons in one instanced rock mesh; planets each their own mesh ---
+  // --- Bodies: all ASTEROIDS (incl. moons/satellites/binaries) in one instanced rock mesh;
+  //     planets and the star/black hole each get their own mesh. ---
   const rockIds = [];
-  for (let i = 0; i < n; i++) if (rocks[i].kind !== "planet") rockIds.push(i);
+  for (let i = 0; i < n; i++) if (rocks[i].kind === "asteroid") rockIds.push(i);
   const rockLi = new Int32Array(n).fill(-1); // asteroid id -> local index in rock mesh
   const rockMesh = new THREE.InstancedMesh(
     new THREE.CircleGeometry(1, 40),
@@ -212,16 +288,46 @@ export function createAsteroidView(scene, world, camCtl) {
 
   for (let i = 0; i < n; i++) {
     const a = rocks[i];
-    if (a.kind !== "planet") continue;
     const rnd = rngFrom(a.seed || a.id + 1);
-    const tex = a.ptype === "terran" ? terranTexture(rnd) : gasTexture(rnd);
-    const pm = new THREE.Mesh(
-      new THREE.CircleGeometry(1, 48),
-      new THREE.MeshBasicMaterial({ map: tex, color: 0x8c8c8c }),
-    );
-    pm.position.set(a.x, a.y, -2);
-    pm.scale.set(a.radius, a.radius, 1);
-    scene.add(pm);
+    if (a.kind === "planet") {
+      const tex = a.ptype === "terran" ? terranTexture(rnd) : gasTexture(rnd);
+      const pm = new THREE.Mesh(
+        new THREE.CircleGeometry(1, 48),
+        new THREE.MeshBasicMaterial({ map: tex, color: 0x8c8c8c }),
+      );
+      pm.position.set(a.x, a.y, -2);
+      pm.scale.set(a.radius, a.radius, 1);
+      scene.add(pm);
+    } else if (a.kind === "star" || a.kind === "blackhole") {
+      const isHole = a.kind === "blackhole";
+      const body = new THREE.Mesh(
+        new THREE.CircleGeometry(1, 56),
+        new THREE.MeshBasicMaterial({
+          map: isHole ? blackholeTexture() : starTexture(rnd),
+          color: 0xffffff, // bright → the star/accretion ring blooms
+          transparent: isHole,
+        }),
+      );
+      body.position.set(a.x, a.y, -2);
+      body.scale.set(a.radius, a.radius, 1);
+      scene.add(body);
+      // Soft additive halo so a star reads as a light source (smaller, dimmer for a hole).
+      const halo = new THREE.Mesh(
+        new THREE.CircleGeometry(1, 40),
+        new THREE.MeshBasicMaterial({
+          map: radialGlowTexture(),
+          color: isHole ? 0x6a4cff : 0xffd27a,
+          transparent: true,
+          opacity: isHole ? 0.35 : 0.6,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        }),
+      );
+      const hs = a.radius * (isHole ? 1.5 : 2.1);
+      halo.position.set(a.x, a.y, -1.7);
+      halo.scale.set(hs, hs, 1);
+      scene.add(halo);
+    }
   }
 
   // --- Rims (owner-colored, one per body; moon rims update each frame) ---
@@ -272,11 +378,49 @@ export function createAsteroidView(scene, world, camCtl) {
     new THREE.LineBasicMaterial({
       color: 0x5878b4,
       transparent: true,
-      opacity: 0.26,
+      opacity: 0.16,
     }),
   );
   net.frustumCulled = false;
   scene.add(net);
+
+  // --- Manual player-built connections (world.links): a brighter, distinct line layer that
+  //     rebuilds when links are added (their endpoints may be moving bodies). ---
+  const linkGeo = new THREE.BufferGeometry();
+  let linkPos = new Float32Array(0);
+  let linkCount = -1;
+  const linkNet = new THREE.LineSegments(
+    linkGeo,
+    new THREE.LineBasicMaterial({
+      color: 0x66ffc8,
+      transparent: true,
+      opacity: 0.6,
+    }),
+  );
+  linkNet.frustumCulled = false;
+  scene.add(linkNet);
+  function writeLinks() {
+    const links = world.links || [];
+    if (links.length !== linkCount) {
+      linkCount = links.length;
+      linkPos = new Float32Array(links.length * 6);
+      linkGeo.setAttribute("position", new THREE.BufferAttribute(linkPos, 3));
+    }
+    for (let e = 0; e < links.length; e++) {
+      const a = rocks[links[e][0]];
+      const b = rocks[links[e][1]];
+      const o = e * 6;
+      linkPos[o] = a.x;
+      linkPos[o + 1] = a.y;
+      linkPos[o + 2] = -2.1;
+      linkPos[o + 3] = b.x;
+      linkPos[o + 4] = b.y;
+      linkPos[o + 5] = -2.1;
+    }
+    linkGeo.setDrawRange(0, links.length * 2);
+    if (links.length) linkGeo.attributes.position.needsUpdate = true;
+  }
+  writeLinks();
 
   // --- LOD aggregate glow ---
   const glow = new THREE.InstancedMesh(
@@ -315,31 +459,39 @@ export function createAsteroidView(scene, world, camCtl) {
   scene.add(selRing);
   let selectedId = -1;
 
-  // --- Rally route polyline + target marker ---
-  const rallyGeo = new THREE.BufferGeometry();
-  rallyGeo.setAttribute(
-    "position",
-    new THREE.BufferAttribute(new Float32Array((n + 1) * 3), 3),
-  );
-  const rallyLine = new THREE.Line(
-    rallyGeo,
-    new THREE.LineBasicMaterial({ transparent: true, opacity: 0.55 }),
+  // --- Rally routes: PERSISTENT for every player-rallied rock (bright source→target line +
+  //     a target flag ring), so the player always sees where their rocks funnel — not only
+  //     while one is selected. This is the visible feedback the rally feature was missing. ---
+  const HUMAN = 0;
+  const rallySegGeo = new THREE.BufferGeometry();
+  let rallySegPos = new Float32Array(0);
+  let rallySegCap = -1;
+  const rallyLine = new THREE.LineSegments(
+    rallySegGeo,
+    new THREE.LineBasicMaterial({
+      color: 0x46ffd2,
+      transparent: true,
+      opacity: 0.7,
+    }),
   );
   rallyLine.visible = false;
   rallyLine.position.z = -1;
   rallyLine.frustumCulled = false;
   scene.add(rallyLine);
-  const rallyFlag = new THREE.Mesh(
-    new THREE.RingGeometry(1, 1.22, 24),
+  const rallyFlags = new THREE.InstancedMesh(
+    new THREE.RingGeometry(0.84, 1.0, 28),
     new THREE.MeshBasicMaterial({
+      color: 0x46ffd2,
       transparent: true,
-      opacity: 0.8,
+      opacity: 0.85,
       side: THREE.DoubleSide,
     }),
+    Math.max(1, n),
   );
-  rallyFlag.visible = false;
-  rallyFlag.position.z = -1;
-  scene.add(rallyFlag);
+  rallyFlags.frustumCulled = false;
+  rallyFlags.count = 0;
+  rallyFlags.position.z = -1;
+  scene.add(rallyFlags);
 
   function setSelected(id) {
     selectedId = id;
@@ -364,14 +516,14 @@ export function createAsteroidView(scene, world, camCtl) {
     }
     if (dirty && rims.instanceColor) rims.instanceColor.needsUpdate = true;
 
-    // moving moons: update their rock body + rim, and the network edges
-    if (hasMoons) {
-      for (const id of moonIds) {
+    // moving bodies (moons / satellites / binaries): update body + rim, and the network edges
+    if (hasMoving) {
+      for (const id of movingIds) {
         const a = rocks[id];
         dummy.position.set(a.x, a.y, -2);
         dummy.scale.set(a.radius, a.radius, 1);
         dummy.updateMatrix();
-        rockMesh.setMatrixAt(rockLi[id], dummy.matrix);
+        if (rockLi[id] >= 0) rockMesh.setMatrixAt(rockLi[id], dummy.matrix);
         dummy.position.set(a.x, a.y, -1.9);
         dummy.updateMatrix();
         rims.setMatrixAt(id, dummy.matrix);
@@ -381,6 +533,7 @@ export function createAsteroidView(scene, world, camCtl) {
       writeNet();
       netGeo.attributes.position.needsUpdate = true;
     }
+    writeLinks();
 
     // selection ring tracks the (possibly moving) selected rock
     const sel = selectedId >= 0 ? rocks[selectedId] : null;
@@ -422,41 +575,52 @@ export function createAsteroidView(scene, world, camCtl) {
   }
 
   function updateRally() {
-    const rock = selectedId >= 0 ? rocks[selectedId] : null;
-    const tgt = rock && rock.rally >= 0 ? rocks[rock.rally] : null;
-    if (!rock || !tgt) {
+    // Every player rock with a rally set draws a straight source→target line + a target flag.
+    const rallied = [];
+    for (let i = 0; i < n; i++) {
+      const r = rocks[i];
+      if (
+        r.owner === HUMAN &&
+        r.rally != null &&
+        r.rally >= 0 &&
+        rocks[r.rally]
+      )
+        rallied.push(r);
+    }
+    if (rallied.length === 0) {
       rallyLine.visible = false;
-      rallyFlag.visible = false;
+      rallyFlags.count = 0;
       return;
     }
-    const hex = ownerColorHex(rock.owner);
-    const p = rallyGeo.attributes.position.array;
-    const nav = world.nav;
-    let idx = 0,
-      node = rock.id,
-      steps = 0;
-    p[idx++] = rock.x;
-    p[idx++] = rock.y;
-    p[idx++] = -1;
-    while (node !== tgt.id && steps < n) {
-      const hop = nav && nav[node] ? nav[node][tgt.id] : tgt.id;
-      if (hop < 0 || hop === node) break;
-      node = hop;
-      p[idx++] = rocks[node].x;
-      p[idx++] = rocks[node].y;
-      p[idx++] = -1;
-      steps++;
+    if (rallied.length * 2 !== rallySegCap) {
+      rallySegCap = rallied.length * 2;
+      rallySegPos = new Float32Array(rallied.length * 6);
+      rallySegGeo.setAttribute(
+        "position",
+        new THREE.BufferAttribute(rallySegPos, 3),
+      );
     }
-    rallyGeo.setDrawRange(0, idx / 3);
-    rallyGeo.attributes.position.needsUpdate = true;
-    rallyGeo.computeBoundingSphere();
-    rallyLine.material.color.setHex(hex);
+    for (let k = 0; k < rallied.length; k++) {
+      const r = rallied[k];
+      const t = rocks[r.rally];
+      const o = k * 6;
+      rallySegPos[o] = r.x;
+      rallySegPos[o + 1] = r.y;
+      rallySegPos[o + 2] = -1;
+      rallySegPos[o + 3] = t.x;
+      rallySegPos[o + 4] = t.y;
+      rallySegPos[o + 5] = -1;
+      const fr = t.radius + 8;
+      dummy.position.set(t.x, t.y, -1);
+      dummy.scale.set(fr, fr, 1);
+      dummy.updateMatrix();
+      rallyFlags.setMatrixAt(k, dummy.matrix);
+    }
+    rallySegGeo.setDrawRange(0, rallied.length * 2);
+    rallySegGeo.attributes.position.needsUpdate = true;
     rallyLine.visible = true;
-    const fr = tgt.radius + 6;
-    rallyFlag.position.set(tgt.x, tgt.y, -1);
-    rallyFlag.scale.set(fr, fr, 1);
-    rallyFlag.material.color.setHex(hex);
-    rallyFlag.visible = true;
+    rallyFlags.count = rallied.length;
+    rallyFlags.instanceMatrix.needsUpdate = true;
   }
 
   update();

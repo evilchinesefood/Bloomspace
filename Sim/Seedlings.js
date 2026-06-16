@@ -104,6 +104,12 @@ function joinOrbit(world, i, target) {
 function resolveArrival(world, i, target) {
   const s = world.seed;
   const owner = s.owner[i];
+  if (!target.habitable) {
+    // Star / black hole: never colonized — ships just orbit it (a black hole's orbiters are
+    // reaped by World.destroyInBlackHoles next tick).
+    joinOrbit(world, i, target);
+    return;
+  }
   if (target.owner === OWNER_NEUTRAL) {
     // Colonize: first arrival flips ownership, then join the orbit.
     target.owner = owner;

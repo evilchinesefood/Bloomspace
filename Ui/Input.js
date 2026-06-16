@@ -6,6 +6,7 @@
 //   - release over a target rock: sendSeedlings(from, target, fraction, 0) + send FX.
 // All select highlight + drag indicator visuals come from Render (already built).
 import { sendSeedlings, setRally } from "../Sim/Seedlings.js";
+import { tryConnect } from "../Sim/MapGen.js";
 import { plantTree } from "../Sim/Trees.js";
 import { ownerColorHex } from "../Render/Palette.js";
 
@@ -25,15 +26,24 @@ export function createInput({
   let dragging = false; // armed drag from an owned rock
   let pointerId = null;
   let rallyMode = false; // armed: next click sets the selected rock's rally point
+  let connectMode = false; // armed: next click links the selected rock to another owned body
 
   function selectedId() {
     return views.asteroids.selected();
   }
   function setRallyMode(on) {
     rallyMode = !!on;
+    if (rallyMode) connectMode = false; // the two arm-modes are mutually exclusive
   }
   function isRallyMode() {
     return rallyMode;
+  }
+  function setConnectMode(on) {
+    connectMode = !!on;
+    if (connectMode) rallyMode = false;
+  }
+  function isConnectMode() {
+    return connectMode;
   }
 
   function select(id) {
@@ -69,6 +79,24 @@ export function createInput({
       if (clicked < 0) return; // missed an asteroid — keep armed, try again
       setRally(world, src, clicked, HUMAN); // clicking src clears (toId === fromId)
       rallyMode = false;
+      return;
+    }
+
+    // Connect mode: click a SECOND body you control to build a permanent travel link (costs
+    // energy). Empty-space miss keeps it armed; clicking the source itself cancels.
+    if (connectMode) {
+      const src = selectedId();
+      if (
+        src < 0 ||
+        !world.asteroids[src] ||
+        world.asteroids[src].owner !== HUMAN
+      ) {
+        connectMode = false;
+        return;
+      }
+      if (clicked < 0) return; // missed — keep armed
+      if (clicked !== src) tryConnect(world, src, clicked, HUMAN);
+      connectMode = false;
       return;
     }
 
@@ -150,9 +178,12 @@ export function createInput({
     return plantTree(world, id, type, HUMAN);
   }
 
-  // Escape cancels an armed rally pick (the banner tells the player this is available).
+  // Escape cancels an armed rally / connect pick (the banner tells the player this is there).
   function onKey(e) {
-    if (e.key === "Escape" && rallyMode) rallyMode = false;
+    if (e.key === "Escape") {
+      rallyMode = false;
+      connectMode = false;
+    }
   }
 
   canvas.addEventListener("pointerdown", onDown);
@@ -170,5 +201,13 @@ export function createInput({
     picking.endDrag();
   }
 
-  return { plant, selectedId, setRallyMode, isRallyMode, destroy };
+  return {
+    plant,
+    selectedId,
+    setRallyMode,
+    isRallyMode,
+    setConnectMode,
+    isConnectMode,
+    destroy,
+  };
 }

@@ -49,7 +49,16 @@ test("different seed => different layout", () => {
 
 test("asteroid count and stat ranges", () => {
   const w = mk(7, 20);
-  assert.equal(w.asteroids.length, 20);
+  // Every map has exactly one central star (extra, non-habitable) plus the requested bodies.
+  const stars = w.asteroids.filter(
+    (a) => a.kind === "star" || a.kind === "blackhole",
+  );
+  assert.equal(stars.length, 1);
+  assert.equal(
+    w.asteroids.filter((a) => a.kind !== "star" && a.kind !== "blackhole")
+      .length,
+    20,
+  );
   for (const a of w.asteroids) {
     for (const s of [a.energyStat, a.strengthStat, a.speedStat]) {
       assert.ok(s >= 0 && s <= 100, `stat ${s} out of range`);

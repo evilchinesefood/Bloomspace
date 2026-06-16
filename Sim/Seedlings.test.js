@@ -9,20 +9,28 @@ const PLAYERS = [
   { id: 1, isAi: true, difficulty: 1 },
 ];
 
-function mk(seed = 7, count = 16) {
+function mk(seed = 7, count = 20) {
   return createWorld({
     seed,
     asteroidCount: count,
     players: PLAYERS,
-    width: 1000,
-    height: 1000,
+    width: 2000,
+    height: 2000,
   });
 }
 
-// Find a home asteroid for player 0 and a neutral asteroid.
+// A neutral, colonizable body: a plain habitable asteroid (NOT the non-habitable star or a
+// moving moon — sending to those wouldn't colonize / behaves specially).
+function neutralColonizable(w) {
+  return w.asteroids.find(
+    (a) => a.owner === OWNER_NEUTRAL && a.kind === "asteroid" && !a.moon,
+  );
+}
+
+// Find a home asteroid for player 0 and a neutral colonizable asteroid.
 function homeAndNeutral(w, owner = 0) {
   const home = w.asteroids.find((a) => a.owner === owner);
-  const neutral = w.asteroids.find((a) => a.owner === OWNER_NEUTRAL);
+  const neutral = neutralColonizable(w);
   return { home, neutral };
 }
 
@@ -171,7 +179,7 @@ test("sending to OWN asteroid re-homes without ownership change", () => {
   const w = mk();
   const home0 = w.asteroids.find((a) => a.owner === 0);
   // colonize a neutral first to get a second owned rock (send half, keep a reserve)
-  const neutral = w.asteroids.find((a) => a.owner === OWNER_NEUTRAL);
+  const neutral = neutralColonizable(w);
   sendSeedlings(w, home0.id, neutral.id, 0.5, 0);
   stepUntil(w, () => neutral.owner === 0);
   // now send the remaining reserve from home0 to the (now owned) second rock

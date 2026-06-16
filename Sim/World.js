@@ -1,7 +1,7 @@
 // Sim/World.js — game state + data contract. NO three.js import (must run headless).
 // Declares the SoA shape from the plan; orchestrates the per-tick sim.
 import { generateMap } from "./MapGen.js";
-import { updateMoons } from "./Moons.js";
+import { updateOrbits } from "./Moons.js";
 import { updateSeedlings, updateRally } from "./Seedlings.js";
 import { resolveCombat } from "./Combat.js";
 import { updateEconomy } from "./Economy.js";
@@ -136,15 +136,36 @@ export function step(world, dt) {
   // Snapshot positions for render interpolation.
   s.px.set(s.x.subarray(0, s.count));
   s.py.set(s.y.subarray(0, s.count));
-  updateMoons(world, dt); // move moons first so anything orbiting them reads fresh positions
+  updateOrbits(world, dt); // move orbiting bodies first so riders read fresh positions
   updateAi(world, dt); // AI issues commands that take effect through the pipeline below
   updateRally(world, dt); // rallied rocks funnel their orbiting fighters to the anchor
   updateSeedlings(world, dt);
+  destroyInBlackHoles(world); // any ship inside a black hole's orbit is annihilated
   resolveCombat(world, dt);
   updateEconomy(world, dt);
   updateTrees(world, dt);
   checkVictory(world);
   world.tick++;
+}
+
+// Black holes destroy any seedling that enters their orbit. Iterate backwards because
+// killSeedling swap-removes from the dense arrays.
+const BLACKHOLE_KILL_PAD = 54;
+function destroyInBlackHoles(world) {
+  const holes = world.asteroids.filter((a) => a.kind === "blackhole");
+  if (holes.length === 0) return;
+  const s = world.seed;
+  for (let i = s.count - 1; i >= 0; i--) {
+    for (const h of holes) {
+      const dx = s.x[i] - h.x;
+      const dy = s.y[i] - h.y;
+      const rr = h.radius + BLACKHOLE_KILL_PAD;
+      if (dx * dx + dy * dy <= rr * rr) {
+        killSeedling(world, i);
+        break;
+      }
+    }
+  }
 }
 
 export const Sim = { createWorld, spawnSeedling, killSeedling, step };

@@ -1,18 +1,25 @@
-// Sim/Moons.js — moons revolve around their parent planet each tick. NO three.js (headless).
-// Deterministic: orbit params (orbitDist/Ang/Speed/parent) are seeded in MapGen; this just
-// advances the angle and recomputes the moon's world position. Seedlings/trees/combat read
-// asteroid x/y each tick, so everything on a moon moves with it for free.
-export function updateMoons(world, dt) {
+// Sim/Moons.js — orbital bodies revolve each tick. NO three.js (headless). Deterministic:
+// orbit params (orbitParent/orbitCx/orbitCy/orbitDist/orbitAng/orbitSpeed) are seeded in
+// MapGen; this just advances the angle and recomputes world position. Covers moons (orbit a
+// planet), satellites (orbit a host asteroid), and binary members (orbit a fixed midpoint).
+// Seedlings/trees/combat read body x/y each tick, so everything sitting on a moving body
+// moves with it for free. All orbit centers are STATIC bodies or fixed points, so a single
+// pass is order-independent.
+export function updateOrbits(world, dt) {
   const asts = world.asteroids;
   for (let i = 0; i < asts.length; i++) {
-    const m = asts[i];
-    if (!m.moon) continue;
-    const p = asts[m.parent];
-    if (!p) continue;
-    m.orbitAng += m.orbitSpeed * dt;
-    m.x = p.x + Math.cos(m.orbitAng) * m.orbitDist;
-    m.y = p.y + Math.sin(m.orbitAng) * m.orbitDist;
+    const b = asts[i];
+    if (!b.orbiting) continue;
+    const c = b.orbitParent >= 0 ? asts[b.orbitParent] : b;
+    const cx = b.orbitParent >= 0 ? c.x : b.orbitCx;
+    const cy = b.orbitParent >= 0 ? c.y : b.orbitCy;
+    b.orbitAng += b.orbitSpeed * dt;
+    b.x = cx + Math.cos(b.orbitAng) * b.orbitDist;
+    b.y = cy + Math.sin(b.orbitAng) * b.orbitDist;
   }
 }
 
-export default { updateMoons };
+// Backwards-compatible alias (older imports).
+export const updateMoons = updateOrbits;
+
+export default { updateOrbits, updateMoons };

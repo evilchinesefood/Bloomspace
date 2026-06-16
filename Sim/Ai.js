@@ -135,35 +135,27 @@ export function updateAi(world, dt) {
   }
 }
 
-// checkVictory — set terminal world.status. Once 'won'/'lost' it stays put.
-//   'lost' : player 0 owns ZERO asteroids AND has ZERO living seedlings.
-//   'won'  : EVERY asteroid is owned by player 0.
+// checkVictory — set terminal world.status. Once 'won'/'lost' it stays put. Victory is about
+// ELIMINATING THE ENEMY, not occupying every body: neutral rocks (and the non-habitable star)
+// don't need to be taken.
+//   'lost' : player 0 has ZERO asteroids AND ZERO living seedlings.
+//   'won'  : no AI (owner >= 1) holds any asteroid AND has no living seedlings.
 //   else   : 'playing'.
+function hasPresence(world, pred) {
+  const asts = world.asteroids;
+  for (let i = 0; i < asts.length; i++) if (pred(asts[i].owner)) return true;
+  const s = world.seed;
+  for (let i = 0; i < s.count; i++) if (pred(s.owner[i])) return true;
+  return false;
+}
+
 export function checkVictory(world) {
   if (world.status === "won" || world.status === "lost") return;
-  const asts = world.asteroids;
-  if (asts.length > 0 && asts.every((a) => a.owner === 0)) {
-    world.status = "won";
+  if (!hasPresence(world, (o) => o === 0)) {
+    world.status = "lost";
     return;
   }
-  let ownsRock = false;
-  for (let i = 0; i < asts.length; i++) {
-    if (asts[i].owner === 0) {
-      ownsRock = true;
-      break;
-    }
-  }
-  if (!ownsRock) {
-    const s = world.seed;
-    let alive = false;
-    for (let i = 0; i < s.count; i++) {
-      if (s.owner[i] === 0) {
-        alive = true;
-        break;
-      }
-    }
-    if (!alive) world.status = "lost";
-  }
+  if (!hasPresence(world, (o) => o >= 1)) world.status = "won";
 }
 
 export default { updateAi, checkVictory };

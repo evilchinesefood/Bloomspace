@@ -5,16 +5,10 @@
 import { el } from "./Menus.js";
 import { ownerColorHex } from "../Render/Palette.js";
 import { TREE_SEED_COST, TREE_ENERGY_COST } from "../Sim/Trees.js";
+import { CONNECT_ENERGY_COST } from "../Sim/MapGen.js";
 
 const hex = (n) => "#" + (n >>> 0).toString(16).padStart(6, "0").slice(-6);
 
-// Count seedlings owned by `owner`.
-function mySeedlings(world, owner) {
-  const s = world.seed;
-  let mine = 0;
-  for (let i = 0; i < s.count; i++) if (s.owner[i] === owner) mine++;
-  return mine;
-}
 function ownedRocks(world, owner) {
   let n = 0;
   for (const a of world.asteroids) if (a.owner === owner) n++;
@@ -65,9 +59,8 @@ export function createHud(root, api) {
 
   const seedsStat = stat("seedling", "#5dff9b"); // harvestable seeds
   const rocksStat = stat("asterisk", "#46e8ff"); // owned asteroids
-  const seedlingsStat = stat("circle", "#ffd24b"); // orbiting seedlings
 
-  bar.append(seedsStat.box, rocksStat.box, seedlingsStat.box);
+  bar.append(seedsStat.box, rocksStat.box);
 
   // Spacer pushes speed controls to the right.
   bar.append(el("div", { style: "flex:1;" }));
@@ -206,6 +199,19 @@ export function createHud(root, api) {
   });
   root.append(rallyBanner);
 
+  // Connect arming banner (same idea, distinct colour/text).
+  const connectBanner = el("div", {
+    style:
+      "position:absolute;top:70px;left:50%;transform:translateX(-50%);pointer-events:none;" +
+      "display:none;align-items:center;gap:.5rem;padding:.5rem .9rem;border-radius:999px;" +
+      "background:rgba(102,255,200,.16);border:1px solid rgba(102,255,200,.6);color:#bdffe6;" +
+      "font:700 .85rem system-ui;white-space:nowrap;box-shadow:0 2px 18px rgba(102,255,200,.25);",
+    html:
+      '<i class="fa-solid fa-link"></i>' +
+      `Click another body you control to link it (−${CONNECT_ENERGY_COST} energy) — Esc to cancel`,
+  });
+  root.append(connectBanner);
+
   const statBar = (label, color) => {
     const fill = el("div", {
       style: `height:100%;width:0%;background:${color};transition:width .2s;`,
@@ -304,6 +310,17 @@ export function createHud(root, api) {
     api.setRallyMode(!api.isRallyMode()),
   );
 
+  // Manual connection: build a permanent travel link to another body you control (costs
+  // energy from this rock). Arms a one-click pick like the rally.
+  const connectBtn = el("wa-button", {
+    size: "small",
+    style: "width:100%;margin-top:.4rem;",
+    html: '<i slot="start" class="fa-solid fa-link"></i>Build Connection',
+  });
+  connectBtn.addEventListener("click", () =>
+    api.setConnectMode(!api.isConnectMode()),
+  );
+
   const hint = el("div", {
     style: "margin-top:.6rem;font:500 .76rem system-ui;opacity:.6;",
     textContent: "Drag from this asteroid to a target to send seedlings.",
@@ -322,6 +339,7 @@ export function createHud(root, api) {
     plantSeedBtn,
     plantDefBtn,
     rallyBtn,
+    connectBtn,
     hint,
   );
 
@@ -365,6 +383,7 @@ export function createHud(root, api) {
     plantSeedBtn.style.display = owned ? "" : "none";
     plantDefBtn.style.display = owned ? "" : "none";
     rallyBtn.style.display = owned ? "" : "none";
+    connectBtn.style.display = owned ? "" : "none";
     hint.style.display = owned ? "" : "none";
     if (owned) {
       const seeds = playerSeeds(world, HUMAN);
@@ -386,9 +405,21 @@ export function createHud(root, api) {
         : rallySet
           ? `<i slot="start" class="fa-solid fa-location-crosshairs"></i>Rally → #${a.rally} (change)`
           : '<i slot="start" class="fa-solid fa-location-crosshairs"></i>Set Rally Point';
+      const connecting = api.isConnectMode && api.isConnectMode();
+      connectBtn.variant = connecting ? "brand" : "neutral";
+      connectBtn.disabled = !connecting && a.energy < CONNECT_ENERGY_COST;
+      connectBtn.innerHTML = connecting
+        ? '<i slot="start" class="fa-solid fa-xmark"></i>Cancel connection'
+        : `<i slot="start" class="fa-solid fa-link"></i>Build Connection (−${CONNECT_ENERGY_COST}⚡)`;
+      connectBtn.title =
+        a.energy < CONNECT_ENERGY_COST
+          ? `Needs ${CONNECT_ENERGY_COST} stored energy on this body`
+          : `Link to another body you control for ${CONNECT_ENERGY_COST} energy`;
       hint.textContent = arming
         ? "Click a target asteroid to set the rally (click this rock to clear)."
-        : "Drag from this asteroid to a target to send seedlings.";
+        : connecting
+          ? "Click another body you control to build a permanent link."
+          : "Drag from this asteroid to a target to send seedlings.";
     }
   }
 
@@ -398,10 +429,11 @@ export function createHud(root, api) {
     if (!world) return;
     seedsStat.set(playerSeeds(world, HUMAN));
     rocksStat.set(ownedRocks(world, HUMAN));
-    seedlingsStat.set(mySeedlings(world, HUMAN));
     refreshSpeed();
     rallyBanner.style.display =
       api.isRallyMode && api.isRallyMode() ? "flex" : "none";
+    connectBanner.style.display =
+      api.isConnectMode && api.isConnectMode() ? "flex" : "none";
     renderPanel(world);
   }
 
@@ -409,6 +441,7 @@ export function createHud(root, api) {
     bar.remove();
     panel.remove();
     rallyBanner.remove();
+    connectBanner.remove();
   }
 
   return { update, refreshSpeed, destroy, dom: { bar, panel } };
