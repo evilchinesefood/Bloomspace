@@ -1,0 +1,3 @@
+# Apache's default DirectoryIndex is lowercase-only; our entry is PascalCase, so a bare
+# /bloomspace/ URL needs this to serve Index.html.
+DirectoryIndex Index.html

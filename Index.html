@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Bloomspace</title>
+    <meta name="theme-color" content="#05070f" />
+
+    <!-- Derive a relative base from the current URL so the app works deployed under a
+         subpath (e.g. /bloomspace/). All other URLs are relative to this base. -->
+    <script>
+      (function () {
+        var path = location.pathname;
+        var dir = path.slice(0, path.lastIndexOf("/") + 1);
+        var base = document.createElement("base");
+        base.href = dir;
+        document.head.appendChild(base);
+      })();
+    </script>
+
+    <link rel="manifest" href="Manifest.webmanifest" />
+    <link rel="icon" href="Icons/Icon.svg" type="image/svg+xml" />
+
+    <!-- Vendored stylesheets (relative). -->
+    <link rel="stylesheet" href="Vendor/FontAwesome/Css/All.min.css" />
+    <link rel="stylesheet" href="Vendor/WebAwesome/styles/webawesome.css" />
+
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #05070f;
+        overflow: hidden;
+      }
+      #Canvas {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        display: block;
+        touch-action: none;
+      }
+      #Ui {
+        position: fixed;
+        inset: 0;
+        pointer-events: none; /* UI children opt back in as needed */
+        z-index: 10;
+      }
+    </style>
+
+    <!-- Import map: bare specifiers -> vendored three. Paths are relative so they
+         resolve under the deploy subpath via <base>. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./Vendor/Three/Three.module.js",
+          "three/addons/": "./Vendor/Three/Jsm/"
+        }
+      }
+    </script>
+
+    <!-- Web Awesome: point the loader at the vendored folder so components lazy-load
+         offline with NO CDN fetch and NO kit token. -->
+    <script type="module">
+      import { setBasePath } from "./Vendor/WebAwesome/webawesome.loader.js";
+      setBasePath(new URL("./Vendor/WebAwesome/", document.baseURI).href);
+    </script>
+  </head>
+  <body>
+    <canvas id="Canvas"></canvas>
+    <div id="Ui"></div>
+
+    <script type="module" src="./Main.js"></script>
+  </body>
+</html>

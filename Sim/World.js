@@ -1,0 +1,151 @@
+// Sim/World.js — game state + data contract. NO three.js import (must run headless).
+// This is the T1 stub: it declares the SoA shape from the plan and a proof-of-life
+// stepper. T2 fills in MapGen, sending, colonization, etc.
+
+// Owners:        -1 neutral, 0 human, 1..N AI
+// Seedling state: 0 ORBIT, 1 TRANSIT, 2 COMBAT, 3 DEAD
+export const OWNER_NEUTRAL = -1;
+export const STATE = { ORBIT: 0, TRANSIT: 1, COMBAT: 2, DEAD: 3 };
+
+// Mulberry32 — small seeded deterministic PRNG -> [0,1).
+function makeRng(seed) {
+  let s = seed >>> 0;
+  return function () {
+    s |= 0;
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function makeSeedArrays(capacity) {
+  return {
+    count: 0,
+    capacity,
+    x: new Float32Array(capacity),
+    y: new Float32Array(capacity),
+    px: new Float32Array(capacity),
+    py: new Float32Array(capacity),
+    vx: new Float32Array(capacity),
+    vy: new Float32Array(capacity),
+    home: new Int32Array(capacity),
+    target: new Int32Array(capacity),
+    owner: new Int8Array(capacity),
+    energy: new Float32Array(capacity),
+    strength: new Float32Array(capacity),
+    orbitAngle: new Float32Array(capacity),
+    orbitRadius: new Float32Array(capacity),
+    state: new Uint8Array(capacity),
+  };
+}
+
+export function createWorld(config = {}) {
+  const width = config.width ?? 1000;
+  const height = config.height ?? 1000;
+  const capacity = config.capacity ?? 4096;
+  const world = {
+    width,
+    height,
+    tick: 0,
+    status: "playing",
+    rng: makeRng(config.seed ?? 1),
+    players: config.players ?? [{ id: 0, isAi: false, difficulty: 0 }],
+    asteroids: [],
+    seed: makeSeedArrays(capacity),
+  };
+  // T1 proof-of-life: one asteroid at center, one seedling orbiting it.
+  world.asteroids.push({
+    id: 0,
+    x: width / 2,
+    y: height / 2,
+    radius: 40,
+    energyStat: 60,
+    strengthStat: 50,
+    speedStat: 50,
+    owner: 0,
+    energy: 100,
+    trees: [],
+  });
+  spawnSeedling(world, {
+    home: 0,
+    owner: 0,
+    orbitRadius: 90,
+    orbitAngle: 0,
+    strength: 50,
+    energy: 10,
+  });
+  return world;
+}
+
+// spawnSeedling -> index, or -1 if at capacity.
+export function spawnSeedling(world, opts = {}) {
+  const s = world.seed;
+  if (s.count >= s.capacity) return -1;
+  const i = s.count++;
+  const a = world.asteroids[opts.home ?? 0];
+  s.home[i] = opts.home ?? 0;
+  s.target[i] = -1;
+  s.owner[i] = opts.owner ?? OWNER_NEUTRAL;
+  s.orbitRadius[i] = opts.orbitRadius ?? 80;
+  s.orbitAngle[i] = opts.orbitAngle ?? 0;
+  s.strength[i] = opts.strength ?? 50;
+  s.energy[i] = opts.energy ?? 10;
+  s.state[i] = STATE.ORBIT;
+  const cx = a ? a.x : 0;
+  const cy = a ? a.y : 0;
+  s.x[i] = cx + Math.cos(s.orbitAngle[i]) * s.orbitRadius[i];
+  s.y[i] = cy + Math.sin(s.orbitAngle[i]) * s.orbitRadius[i];
+  s.px[i] = s.x[i];
+  s.py[i] = s.y[i];
+  s.vx[i] = 0;
+  s.vy[i] = 0;
+  return i;
+}
+
+// killSeedling — swap-remove to keep arrays dense.
+export function killSeedling(world, i) {
+  const s = world.seed;
+  const last = --s.count;
+  if (i !== last) {
+    for (const k of [
+      "x",
+      "y",
+      "px",
+      "py",
+      "vx",
+      "vy",
+      "home",
+      "target",
+      "owner",
+      "energy",
+      "strength",
+      "orbitAngle",
+      "orbitRadius",
+      "state",
+    ]) {
+      s[k][i] = s[k][last];
+    }
+  }
+}
+
+// step — advance exactly one fixed tick. T1 proof-of-life: orbit every seedling
+// around its home asteroid. T2 replaces this with real seedling/economy/combat logic.
+export function step(world, dt) {
+  const s = world.seed;
+  // Snapshot positions for render interpolation.
+  s.px.set(s.x.subarray(0, s.count));
+  s.py.set(s.y.subarray(0, s.count));
+  for (let i = 0; i < s.count; i++) {
+    if (s.state[i] === STATE.DEAD) continue;
+    const a = world.asteroids[s.home[i]];
+    if (!a) continue;
+    s.orbitAngle[i] += dt * 1.2; // radians/sec
+    s.x[i] = a.x + Math.cos(s.orbitAngle[i]) * s.orbitRadius[i];
+    s.y[i] = a.y + Math.sin(s.orbitAngle[i]) * s.orbitRadius[i];
+  }
+  world.tick++;
+}
+
+export const Sim = { createWorld, spawnSeedling, killSeedling, step };
+export default Sim;

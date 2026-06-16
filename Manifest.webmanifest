@@ -1,0 +1,19 @@
+{
+  "name": "Bloomspace",
+  "short_name": "Bloomspace",
+  "description": "Eufloria-style real-time strategy: colonize asteroids with glowing orbiting seedlings.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#05070f",
+  "theme_color": "#05070f",
+  "icons": [
+    {
+      "src": "Icons/Icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
