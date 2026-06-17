@@ -2,7 +2,13 @@
 // Deterministic: every choice flows through world.rng(); never Math.random. The AI is a
 // pure controller — it issues the SAME commands a human would (sendSeedlings, plantTree)
 // and never mutates SoA arrays or asteroid ownership directly.
-import { OWNER_NEUTRAL, STATE, WORLD_STATUS } from "./World.js";
+import {
+  OWNER_NEUTRAL,
+  STATE,
+  WORLD_STATUS,
+  EVENT,
+  pushEvent,
+} from "./World.js";
 import { sendSeedlings } from "./Seedlings.js";
 import { plantTree } from "./Trees.js";
 
@@ -178,11 +184,16 @@ function hasPresence(world, pred) {
 export function checkVictory(world) {
   if (world.status === WORLD_STATUS.WON || world.status === WORLD_STATUS.LOST)
     return;
+  // Status latches, so this transition fires exactly once — emit the matching event here.
   if (!hasPresence(world, (o) => o === 0)) {
     world.status = WORLD_STATUS.LOST;
+    pushEvent(world, EVENT.LOSE);
     return;
   }
-  if (!hasPresence(world, (o) => o >= 1)) world.status = WORLD_STATUS.WON;
+  if (!hasPresence(world, (o) => o >= 1)) {
+    world.status = WORLD_STATUS.WON;
+    pushEvent(world, EVENT.WIN);
+  }
 }
 
 export default { updateAi, checkVictory };

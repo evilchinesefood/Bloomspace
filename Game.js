@@ -2,7 +2,7 @@
 // builds a world from the given config (parametrized by the skirmish setup), constructs
 // the scene/views/picking, and attaches the real T7 input loop. Render reads sim state;
 // the human mutates the world ONLY through Input (sendSeedlings / plantTree).
-import Sim, { createWorld } from "./Sim/World.js";
+import Sim, { createWorld, EVENT } from "./Sim/World.js";
 import { ownerColorHex } from "./Render/Palette.js";
 import { createScene } from "./Render/Scene.js";
 import { createAsteroidView, sharedTextures } from "./Render/AsteroidView.js";
@@ -101,13 +101,20 @@ export function createGame(canvas, config = {}) {
     const dt = Math.min(0.05, (now - lastRenderMs) / 1000);
     lastRenderMs = now;
 
-    // Drain the sim's exact per-tick death positions (recorded in killSeedling) into puffs,
-    // capped. Accumulates across the steps run this frame; cleared here so a paused frame
-    // (no steps) re-spawns nothing. Replaces the old count-delta guess at COMBAT hotspots.
-    const d = world.deaths;
-    const dn = Math.min(d.n, DEATH_PUFF_MAX);
-    for (let k = 0; k < dn; k++) fx.spawnDeath(d.x[k], d.y[k]);
-    d.n = 0;
+    // Drain the sim's exact per-tick event channel (recorded during step()). DEATH events
+    // become death puffs, capped so big die-offs don't spam the pool — we cap the puffs SPAWNED,
+    // not the events scanned (other types are skipped, audio consumes them next feature).
+    // Accumulates across the steps run this frame; cleared here so a paused frame (no steps)
+    // re-spawns nothing.
+    const ev = world.events;
+    let puffs = 0;
+    for (let k = 0; k < ev.n; k++) {
+      if (ev.type[k] === EVENT.DEATH && puffs < DEATH_PUFF_MAX) {
+        fx.spawnDeath(ev.x[k], ev.y[k]);
+        puffs++;
+      }
+    }
+    ev.n = 0;
 
     flowerTimer += dt;
     if (flowerTimer >= FLOWER_EVERY) {

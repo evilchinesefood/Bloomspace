@@ -5,7 +5,14 @@
 // INVARIANT (load-bearing): world.asteroids is NEVER removed or reordered here — we only
 // mutate `asteroid.owner`. Seedling home/target are indices into world.asteroids, so any
 // reorder would silently corrupt every seedling's home/target. Only `owner` is touched.
-import { STATE, killSeedling, OWNER_NEUTRAL, MAX_PLAYERS } from "./World.js";
+import {
+  STATE,
+  killSeedling,
+  OWNER_NEUTRAL,
+  MAX_PLAYERS,
+  EVENT,
+  pushEvent,
+} from "./World.js";
 
 export const CONTACT_RADIUS = 14; // world units; enemies this close trade damage
 export const COMBAT_RATE = 0.1; // damage/sec scalar: energy -= enemyStrength*RATE*dt
@@ -210,6 +217,7 @@ function flipOwnership(world) {
     if (ownerPresent) continue;
     if (rival >= 0) {
       rock.owner = rival; // exactly one rival side, defenders gone → flip
+      pushEvent(world, EVENT.CAPTURE, rock.x, rock.y, rival);
       rock.rally = -1; // a captured rock drops the old owner's rally anchor
     }
   }

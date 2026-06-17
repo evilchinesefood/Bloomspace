@@ -1,6 +1,6 @@
 // Sim/Seedlings.js — per-tick seedling movement (orbit/transit), sending, and arrival
 // colonization. NO three.js. Combat (COMBAT/DEAD) is deferred to T4.
-import { STATE, OWNER_NEUTRAL, KIND } from "./World.js";
+import { STATE, OWNER_NEUTRAL, KIND, EVENT, pushEvent } from "./World.js";
 
 const TAU = Math.PI * 2;
 const ORBIT_BASE = 1.2; // max angular speed (rad/sec) — caps tiny rocks from whirling
@@ -127,6 +127,7 @@ function resolveArrival(world, i, target) {
   if (target.owner === OWNER_NEUTRAL) {
     // Colonize: first arrival flips ownership, then join the orbit.
     target.owner = owner;
+    pushEvent(world, EVENT.CAPTURE, target.x, target.y, owner);
     joinOrbit(world, i, target);
   } else if (target.owner === owner) {
     // Reinforce: just join the orbit.
@@ -253,6 +254,12 @@ export function sendSeedlings(world, fromId, toId, fraction, owner) {
   }
   const n = Math.floor(eligible.length * f);
   for (let k = 0; k < n; k++) launchSeedling(world, eligible[k], target);
+  // One SEND event per real dispatch, at the origin rock — the sanctioned send path for both
+  // human and AI, so AI sends get audio too. 0-send (floored fraction) emits nothing.
+  if (n > 0) {
+    const from = world.asteroids[fromId];
+    if (from) pushEvent(world, EVENT.SEND, from.x, from.y, owner);
+  }
   return n;
 }
 

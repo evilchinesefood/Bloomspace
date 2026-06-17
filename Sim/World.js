@@ -23,6 +23,42 @@ export const WORLD_STATUS = { PLAYING: "playing", WON: "won", LOST: "lost" };
 // Palette AI color count. Combat's same-body buffers and the AI palette derive from this.
 export const MAX_PLAYERS = 7;
 
+// Event channel tags. Sim records events deterministically during step(); Render drains them
+// each frame for FX + audio. FIRE is reserved for the later bombardment superweapon (no emitter
+// yet). Keep this contract stable — audio and bombardment both build on it.
+export const EVENT = {
+  DEATH: 0,
+  SEND: 1,
+  CAPTURE: 2,
+  FIRE: 3,
+  WIN: 4,
+  LOSE: 5,
+};
+
+// pushEvent — append one event to world.events (allocation-free). Silently drops when full,
+// mirroring the deaths overflow guard. type is an EVENT.* tag; x,y the primary world position;
+// owner an aux id (-1 default); x2,y2 an aux position (FIRE target).
+export function pushEvent(
+  world,
+  type,
+  x = 0,
+  y = 0,
+  owner = -1,
+  x2 = 0,
+  y2 = 0,
+) {
+  const e = world.events;
+  if (!e || e.n >= e.capacity) return;
+  const k = e.n;
+  e.type[k] = type;
+  e.x[k] = x;
+  e.y[k] = y;
+  e.x2[k] = x2;
+  e.y2[k] = y2;
+  e.owner[k] = owner;
+  e.n++;
+}
+
 // Mulberry32 — small seeded deterministic PRNG -> [0,1).
 function makeRng(seed) {
   let s = seed >>> 0;
@@ -72,12 +108,18 @@ export function createWorld(config = {}) {
     players: config.players ?? [{ id: 0, isAi: false, difficulty: 0 }],
     asteroids: [],
     seed: makeSeedArrays(capacity),
-    // Per-step death events (exact positions) for non-authoritative render FX. Preallocated
-    // SoA — appended in killSeedling, drained (n reset) by Render each frame. No allocation.
-    deaths: {
+    // Per-step event channel (deaths/sends/captures/fires/win-lose). Preallocated parallel SoA —
+    // appended via pushEvent during step(), drained (n reset) by Render each frame for FX + audio.
+    // No allocation in steady state; overflow is silently dropped (capacity = seed capacity).
+    events: {
+      type: new Uint8Array(capacity),
       x: new Float32Array(capacity),
       y: new Float32Array(capacity),
+      x2: new Float32Array(capacity),
+      y2: new Float32Array(capacity),
+      owner: new Int16Array(capacity),
       n: 0,
+      capacity,
     },
   };
   // Normalize every player to have a harvestable seeds resource (additive).
@@ -139,17 +181,12 @@ const SEED_FIELDS = [
   "slingRem",
 ];
 
-// killSeedling — swap-remove to keep arrays dense. Records the dying ship's position into
-// world.deaths first (every death routes through here — combat + black holes) so Render can
-// draw death FX at exact spots instead of guessing from per-frame count deltas.
+// killSeedling — swap-remove to keep arrays dense. Records an EVENT.DEATH at the dying ship's
+// position first (every death routes through here — combat + black holes) so Render can draw
+// death FX / play audio at exact spots instead of guessing from per-frame count deltas.
 export function killSeedling(world, i) {
   const s = world.seed;
-  const d = world.deaths;
-  if (d && d.n < d.x.length) {
-    d.x[d.n] = s.x[i];
-    d.y[d.n] = s.y[i];
-    d.n++;
-  }
+  pushEvent(world, EVENT.DEATH, s.x[i], s.y[i], s.owner[i]);
   const last = --s.count;
   if (i !== last) {
     for (let f = 0; f < SEED_FIELDS.length; f++) {
