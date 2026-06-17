@@ -4,6 +4,7 @@
 // Chrome only: it READS sim state and CALLS the action callbacks; it never mutates world.
 import { el } from "./Menus.js";
 import { ownerColorHex } from "../Render/Palette.js";
+import { createMinimap } from "../Render/Minimap.js";
 import { TREE_SEED_COST, TREE_ENERGY_COST } from "../Sim/Trees.js";
 import { CONNECT_ENERGY_COST } from "../Sim/MapGen.js";
 import { KIND } from "../Sim/World.js";
@@ -385,6 +386,13 @@ export function createHud(root, api) {
   });
   root.append(connectBanner);
 
+  // --- Minimap (whole-map overview, bottom-right) ----------------------------
+  // Visuals only: reads the world + camera view rect, click/drag re-centers the camera.
+  const minimap = createMinimap(root, api.getWorld, {
+    getViewRect: api.getViewRect,
+    centerOn: api.centerCamera,
+  });
+
   const statBar = (label, color) => {
     const fill = el("div", {
       style: `height:100%;width:0%;background:${color};transition:width .2s;`,
@@ -642,6 +650,7 @@ export function createHud(root, api) {
     connectBanner.style.display =
       api.isConnectMode && api.isConnectMode() ? "flex" : "none";
     renderPanel(world);
+    minimap.update();
   }
 
   // 'i' key toggles the inbound-rally view (when a body is selected). Ignore while typing in
@@ -659,6 +668,7 @@ export function createHud(root, api) {
     panel.remove();
     rallyBanner.remove();
     connectBanner.remove();
+    minimap.destroy();
     window.removeEventListener("keydown", onKey);
   }
 

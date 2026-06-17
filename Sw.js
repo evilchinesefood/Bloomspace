@@ -45,6 +45,7 @@ const SHELL = [
   "Render/Fx.js",
   "Render/Picking.js",
   "Render/Palette.js",
+  "Render/Minimap.js",
   "Render/Glyphs.js",
   "Vendor/Three/Three.module.js",
   "Vendor/Three/Jsm/postprocessing/EffectComposer.js",

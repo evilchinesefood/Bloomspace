@@ -197,6 +197,23 @@ export function createScene(canvas, world) {
     applyCamera();
   }
 
+  // Pan the camera to center on a world point (clamped by applyCamera). Used by the minimap.
+  function centerOn(worldX, worldY) {
+    centerX = worldX;
+    centerY = worldY;
+    applyCamera();
+  }
+
+  // The currently-visible world rectangle: center ± half-extents at the live zoom.
+  function getViewRect() {
+    return {
+      cx: centerX,
+      cy: centerY,
+      halfW: baseHalfW / zoom,
+      halfH: baseHalfH / zoom,
+    };
+  }
+
   // Screen px → world (x,y) at the CURRENT camera, for zoom-to-cursor.
   function screenToWorld(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
@@ -384,6 +401,8 @@ export function createScene(canvas, world) {
     bloom,
     resize,
     resetCamera,
+    centerOn,
+    getViewRect,
     setBloomEnabled,
     disposeControls,
     driftStars,

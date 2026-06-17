@@ -189,6 +189,9 @@ export function createGame(canvas, config = {}) {
     setSendFraction: (f) => {
       sendFraction = Math.max(0, Math.min(1, f));
     },
+    // Camera/minimap controls: the visible world rect + a pan-to-center action.
+    getViewRect: () => scene.getViewRect(),
+    centerOn: (x, y) => scene.centerOn(x, y),
     // Quality controls for the HUD settings panel.
     setBloomEnabled: (on) => scene.setBloomEnabled(on),
     setSeedlingCap: (n) => seedlings.setCap(n),

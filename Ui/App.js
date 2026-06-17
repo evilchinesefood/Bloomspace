@@ -122,6 +122,9 @@ export function createApp(root) {
 
     hud = createHud(root, {
       getWorld: () => (game ? game.world : null),
+      // Minimap: the visible world rect + a click-to-pan camera action.
+      getViewRect: () => (game ? game.getViewRect() : null),
+      centerCamera: (x, y) => game && game.centerOn(x, y),
       getSpeed: () => speed,
       setSpeed: (s) => {
         speed = s;
