@@ -18,6 +18,21 @@ function mk(seed, count = 16, players = TWO) {
   });
 }
 
+test("asteroid id === array index (load-bearing SoA invariant)", () => {
+  // Every seedling home/target/dest is an index that doubles as asteroid.id; Combat,
+  // Picking, AsteroidView and Hud all rely on asteroids[i].id === i. A future reorder
+  // (sort/filter/splice) would silently corrupt all game state — assert it can't drift.
+  for (const seed of [1, 42, 1337, 9001]) {
+    for (const count of [8, 16, 26, 44]) {
+      const w = mk(seed, count);
+      assert.ok(
+        w.asteroids.every((a, i) => a.id === i),
+        `id===index broken for seed=${seed} count=${count}`,
+      );
+    }
+  }
+});
+
 test("same seed => identical layout", () => {
   const a = mk(42);
   const b = mk(42);

@@ -6,7 +6,7 @@
 // orbiter, and on a separate timer flower into seeds for the owning player.
 // Defense trees: periodically spawn defender orbiters (normal seedlings) up to a cap; the
 // T4 combat layer makes them auto-attack intruders by proximity.
-import { spawnSeedling, OWNER_NEUTRAL } from "./World.js";
+import { spawnSeedling, OWNER_NEUTRAL, KIND } from "./World.js";
 import { spendEnergy } from "./Economy.js";
 import { launchSeedling } from "./Seedlings.js";
 
@@ -29,8 +29,10 @@ function playerById(world, id) {
   return null;
 }
 
-// Count living seedlings owned by `owner` orbiting asteroid `rockId`.
-function orbitersAt(world, rockId, owner) {
+// Count living seedlings owned by `owner` home'd at asteroid `rockId`, in ANY state (so
+// in-transit defenders still count toward the defender cap). Differs from Ai.js's
+// orbit-only deployable count — hence the distinct name.
+function homedCount(world, rockId, owner) {
   const s = world.seed;
   let n = 0;
   for (let i = 0; i < s.count; i++) {
@@ -60,7 +62,7 @@ export function plantTree(world, asteroidId, type, owner) {
   return true;
 }
 
-function spawnOrbiter(world, rock, kind = 0) {
+function spawnOrbiter(world, rock, kind = KIND.FIGHTER) {
   return spawnSeedling(world, {
     home: rock.id,
     owner: rock.owner,
@@ -90,10 +92,10 @@ export function updateTrees(world, dt) {
         if (tree.cooldown <= 0) {
           tree.cooldown = DEFENSE_INTERVAL;
           if (
-            orbitersAt(world, rock.id, rock.owner) < DEFENDERS_MAX &&
+            homedCount(world, rock.id, rock.owner) < DEFENDERS_MAX &&
             spendEnergy(rock, DEFENDER_ENERGY_COST)
           ) {
-            spawnOrbiter(world, rock, 1); // defender
+            spawnOrbiter(world, rock, KIND.DEFENDER);
           }
         }
         continue;
@@ -103,12 +105,15 @@ export function updateTrees(world, dt) {
       if (tree.cooldown <= 0) {
         tree.cooldown = PRODUCE_INTERVAL;
         if (rock.energy >= SEEDLING_ENERGY_COST) {
-          spendEnergy(rock, SEEDLING_ENERGY_COST);
           const i = spawnOrbiter(world, rock);
-          // Rally: route freshly-produced seedlings to the rock's anchor point.
-          const tgt = rock.rally >= 0 ? world.asteroids[rock.rally] : null;
-          if (i >= 0 && tgt && tgt.id !== rock.id)
-            launchSeedling(world, i, tgt);
+          // Only charge energy on a real spawn — at the seedling cap spawnOrbiter returns
+          // -1, and charging then would silently drain the rock for nothing.
+          if (i >= 0) {
+            spendEnergy(rock, SEEDLING_ENERGY_COST);
+            // Rally: route freshly-produced seedlings to the rock's anchor point.
+            const tgt = rock.rally >= 0 ? world.asteroids[rock.rally] : null;
+            if (tgt && tgt.id !== rock.id) launchSeedling(world, i, tgt);
+          }
         }
       }
       tree.flowerCd -= dt;

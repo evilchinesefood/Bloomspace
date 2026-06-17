@@ -9,6 +9,7 @@ import { sendSeedlings, setRally } from "../Sim/Seedlings.js";
 import { tryConnect } from "../Sim/MapGen.js";
 import { plantTree } from "../Sim/Trees.js";
 import { ownerColorHex } from "../Render/Palette.js";
+import { WORLD_STATUS } from "../Sim/World.js";
 
 const HUMAN = 0;
 const DRAG_THRESHOLD = 6; // px before a press becomes a drag
@@ -27,6 +28,7 @@ export function createInput({
   let pointerId = null;
   let rallyMode = false; // armed: next click sets the selected rock's rally point
   let connectMode = false; // armed: next click links the selected rock to another owned body
+  const activeTouches = new Set(); // live touch pointers — 2+ means a camera gesture, not select
 
   function selectedId() {
     return views.asteroids.selected();
@@ -56,10 +58,21 @@ export function createInput({
   }
 
   function onDown(e) {
+    if (e.pointerType === "touch") {
+      activeTouches.add(e.pointerId);
+      if (activeTouches.size >= 2) {
+        // Second finger down → two-finger camera gesture (Scene.js). Abort select/drag.
+        if (dragging) picking.endDrag();
+        dragging = false;
+        downId = -1;
+        pointerId = null;
+        return;
+      }
+    }
     // Left button only — middle/right drive camera pan in Scene.js.
     if (e.button !== 0) return;
     const world = getWorld();
-    if (!world || world.status !== "playing") return;
+    if (!world || world.status !== WORLD_STATUS.PLAYING) return;
     const clicked = picking.asteroidAt(e.clientX, e.clientY, world);
 
     // Rally-set mode: a single click on a target asteroid sets the selected rock's anchor.
@@ -118,6 +131,7 @@ export function createInput({
   }
 
   function onMove(e) {
+    if (activeTouches.size >= 2) return; // camera gesture owns the pointers
     if (pointerId === null || e.pointerId !== pointerId) return;
     const world = getWorld();
     if (!world) return;
@@ -145,6 +159,7 @@ export function createInput({
   }
 
   function onUp(e) {
+    if (e.pointerType === "touch") activeTouches.delete(e.pointerId);
     if (pointerId === null || e.pointerId !== pointerId) return;
     const world = getWorld();
     canvas.releasePointerCapture && canvas.releasePointerCapture(e.pointerId);
@@ -154,7 +169,7 @@ export function createInput({
     dragging = false;
     picking.endDrag();
 
-    if (!world || world.status !== "playing") {
+    if (!world || world.status !== WORLD_STATUS.PLAYING) {
       downId = -1;
       return;
     }

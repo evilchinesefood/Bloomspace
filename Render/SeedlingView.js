@@ -4,7 +4,7 @@
 // viewport culling, apparent-size LOD (collapse to AsteroidView's aggregate glow when ships
 // would be sub-pixel), a render-only cap, and a teleport snap on re-home.
 import * as THREE from "three";
-import { STATE } from "../Sim/World.js";
+import { STATE, KIND } from "../Sim/World.js";
 import { ownerColor } from "./Palette.js";
 import { glyphTexture, ICON } from "./Glyphs.js";
 
@@ -103,7 +103,7 @@ export function createSeedlingView(scene, world, camCtl) {
       dummy.updateMatrix();
       if (s.state[i] === STATE.COMBAT) col.setHex(COMBAT_TINT);
       else ownerColor(col, s.owner[i]);
-      if (s.kind[i] === 1) {
+      if (s.kind[i] === KIND.DEFENDER) {
         defenders.setMatrixAt(vd, dummy.matrix);
         defenders.setColorAt(vd, col);
         vd++;

@@ -2,15 +2,42 @@
 // builds a world from the given config (parametrized by the skirmish setup), constructs
 // the scene/views/picking, and attaches the real T7 input loop. Render reads sim state;
 // the human mutates the world ONLY through Input (sendSeedlings / plantTree).
-import Sim, { createWorld, STATE } from "./Sim/World.js";
+import Sim, { createWorld } from "./Sim/World.js";
 import { ownerColorHex } from "./Render/Palette.js";
 import { createScene } from "./Render/Scene.js";
-import { createAsteroidView } from "./Render/AsteroidView.js";
+import { createAsteroidView, sharedTextures } from "./Render/AsteroidView.js";
 import { createSeedlingView } from "./Render/SeedlingView.js";
 import { createTreeView } from "./Render/TreeView.js";
 import { createFx } from "./Render/Fx.js";
 import { createPicking } from "./Render/Picking.js";
 import { createInput } from "./Ui/Input.js";
+
+// Free every GPU resource a match's scene graph holds. renderer.dispose()/forceContextLoss
+// reclaim the GL context, but the geometries, materials, instance buffers and (notably)
+// procedural CanvasTextures created per match are otherwise retained on the JS heap across
+// New Game cycles. Traverse once, dedupe, dispose. `keep` is the set of deliberately shared
+// (module-cached) textures that must survive teardown for reuse by the next match.
+function disposeSceneGraph(root, keep) {
+  const geos = new Set();
+  const mats = new Set();
+  const texs = new Set();
+  root.traverse((o) => {
+    if (o.geometry) geos.add(o.geometry);
+    const m = o.material;
+    if (m) (Array.isArray(m) ? m : [m]).forEach((mm) => mm && mats.add(mm));
+    if (typeof o.dispose === "function") o.dispose(); // InstancedMesh instance buffers
+  });
+  for (const m of mats)
+    for (const k in m) {
+      const v = m[k];
+      if (v && v.isTexture) texs.add(v);
+    }
+  geos.forEach((g) => g.dispose());
+  texs.forEach((t) => {
+    if (!keep || !keep.has(t)) t.dispose();
+  });
+  mats.forEach((m) => m.dispose());
+}
 
 const DEFAULT_CONFIG = {
   width: 1700,
@@ -54,23 +81,9 @@ export function createGame(canvas, config = {}) {
   let lastRenderMs = performance.now();
 
   // --- FX polish: cheap, non-authoritative death + flower puffs (render READS sim only).
-  // Deaths: when the live seedling count drops between frames, scatter a few death puffs at
-  // current COMBAT-state hotspots (we don't track exact dead indices — visual sugar only).
-  let lastSeedCount = world.seed.count;
   let flowerTimer = 0;
   const FLOWER_EVERY = 0.9; // seconds between flower-puff sweeps
   const DEATH_PUFF_MAX = 4; // cap puffs per frame so big die-offs don't spam the pool
-
-  function emitDeathPuffs() {
-    const s = world.seed;
-    let spawned = 0;
-    for (let i = 0; i < s.count && spawned < DEATH_PUFF_MAX; i++) {
-      if (s.state[i] === STATE.COMBAT) {
-        fx.spawnDeath(s.x[i], s.y[i]);
-        spawned++;
-      }
-    }
-  }
 
   function emitFlowerPuffs() {
     for (const a of world.asteroids) {
@@ -88,9 +101,13 @@ export function createGame(canvas, config = {}) {
     const dt = Math.min(0.05, (now - lastRenderMs) / 1000);
     lastRenderMs = now;
 
-    const count = world.seed.count;
-    if (count < lastSeedCount) emitDeathPuffs();
-    lastSeedCount = count;
+    // Drain the sim's exact per-tick death positions (recorded in killSeedling) into puffs,
+    // capped. Accumulates across the steps run this frame; cleared here so a paused frame
+    // (no steps) re-spawns nothing. Replaces the old count-delta guess at COMBAT hotspots.
+    const d = world.deaths;
+    const dn = Math.min(d.n, DEATH_PUFF_MAX);
+    for (let k = 0; k < dn; k++) fx.spawnDeath(d.x[k], d.y[k]);
+    d.n = 0;
 
     flowerTimer += dt;
     if (flowerTimer >= FLOWER_EVERY) {
@@ -104,7 +121,9 @@ export function createGame(canvas, config = {}) {
     trees.update();
     fx.update(dt);
     picking.update();
-    scene.composer.render();
+    // Skip the GL draw while the WebGL context is lost (else composer.render throws every
+    // frame). The loop keeps running; rendering resumes when the context is restored.
+    if (!scene.isContextLost || !scene.isContextLost()) scene.composer.render();
   }
 
   function destroy() {
@@ -116,6 +135,9 @@ export function createGame(canvas, config = {}) {
     // Release the WebGL context so repeated New Game cycles don't exhaust the browser's
     // context budget (Scene builds a fresh renderer on the shared canvas each match).
     try {
+      // Free per-match geometries/materials/textures/instance buffers; keep the shared
+      // module-cached glow texture (AsteroidView reuses it across matches).
+      disposeSceneGraph(scene.scene, new Set(sharedTextures()));
       scene.composer.dispose && scene.composer.dispose();
       scene.renderer.dispose();
       scene.renderer.forceContextLoss && scene.renderer.forceContextLoss();

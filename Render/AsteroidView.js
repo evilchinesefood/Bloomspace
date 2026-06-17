@@ -250,6 +250,12 @@ function radialGlowTexture() {
   return _glowTex;
 }
 
+// Textures deliberately cached at module scope and shared across matches — match teardown
+// (Game.disposeSceneGraph) must NOT dispose these, or the next match gets a dead texture.
+export function sharedTextures() {
+  return _glowTex ? [_glowTex] : [];
+}
+
 export function createAsteroidView(scene, world, camCtl) {
   const rocks = world.asteroids;
   const n = rocks.length;

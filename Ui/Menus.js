@@ -165,7 +165,7 @@ export function showStartMenu(root, { onNew }) {
   card.append(
     el("div", {
       style: "margin-top:.8rem;font:600 .72rem system-ui;opacity:.4;",
-      textContent: "build v20",
+      textContent: "build v21",
     }),
   );
 

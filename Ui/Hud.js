@@ -6,6 +6,7 @@ import { el } from "./Menus.js";
 import { ownerColorHex } from "../Render/Palette.js";
 import { TREE_SEED_COST, TREE_ENERGY_COST } from "../Sim/Trees.js";
 import { CONNECT_ENERGY_COST } from "../Sim/MapGen.js";
+import { KIND } from "../Sim/World.js";
 
 const hex = (n) => "#" + (n >>> 0).toString(16).padStart(6, "0").slice(-6);
 
@@ -40,7 +41,7 @@ function orbitCounts(world, id, me) {
     enemy = 0;
   for (let i = 0; i < s.count; i++) {
     if (s.home[i] !== id || s.state[i] !== 0) continue; // STATE.ORBIT === 0
-    if (s.owner[i] === me) s.kind[i] === 1 ? dMine++ : fMine++;
+    if (s.owner[i] === me) s.kind[i] === KIND.DEFENDER ? dMine++ : fMine++;
     else enemy++;
   }
   return { fMine, dMine, enemy };
@@ -394,12 +395,14 @@ export function createHud(root, api) {
 
     // Orbiting ships at this body (fighters / defenders / enemies). Selected-body only.
     const oc = orbitCounts(world, id, HUMAN);
-    orbitEl.innerHTML =
+    setHtml(
+      orbitEl,
       `<span title="Your fighters" style="color:#cfe9ff"><i class="fa-solid fa-jet-fighter-up"></i> ${oc.fMine}</span>` +
-      `<span title="Your defenders" style="color:#9fffcf"><i class="fa-solid fa-shuttle-space"></i> ${oc.dMine}</span>` +
-      (oc.enemy
-        ? `<span title="Enemy ships" style="color:#ff6b6b"><i class="fa-solid fa-skull"></i> ${oc.enemy}</span>`
-        : "");
+        `<span title="Your defenders" style="color:#9fffcf"><i class="fa-solid fa-shuttle-space"></i> ${oc.dMine}</span>` +
+        (oc.enemy
+          ? `<span title="Enemy ships" style="color:#ff6b6b"><i class="fa-solid fa-skull"></i> ${oc.enemy}</span>`
+          : ""),
+    );
 
     const owned = a.owner === HUMAN;
     // Only your own rocks expose send/plant/rally; others are info-only.

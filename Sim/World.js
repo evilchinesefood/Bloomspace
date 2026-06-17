@@ -15,6 +15,13 @@ export const STARTING_SEEDS = 10;
 // around a body it's passing — fights any ships stationed there during the arc).
 export const OWNER_NEUTRAL = -1;
 export const STATE = { ORBIT: 0, TRANSIT: 1, COMBAT: 2, DEAD: 3, SLING: 4 };
+// Seedling kinds (the SoA `kind` field). Named so the 0/1 literals don't sprawl across layers.
+export const KIND = { FIGHTER: 0, DEFENDER: 1 };
+// Terminal/active match status (world.status). Single source for the string union.
+export const WORLD_STATUS = { PLAYING: "playing", WON: "won", LOST: "lost" };
+// Max distinct players (owner ids 0..MAX_PLAYERS-1): 1 human + up to 6 AI, bounded by the
+// Palette AI color count. Combat's same-body buffers and the AI palette derive from this.
+export const MAX_PLAYERS = 7;
 
 // Mulberry32 — small seeded deterministic PRNG -> [0,1).
 function makeRng(seed) {
@@ -60,11 +67,18 @@ export function createWorld(config = {}) {
     width,
     height,
     tick: 0,
-    status: "playing",
+    status: WORLD_STATUS.PLAYING,
     rng: makeRng(config.seed ?? 1),
     players: config.players ?? [{ id: 0, isAi: false, difficulty: 0 }],
     asteroids: [],
     seed: makeSeedArrays(capacity),
+    // Per-step death events (exact positions) for non-authoritative render FX. Preallocated
+    // SoA — appended in killSeedling, drained (n reset) by Render each frame. No allocation.
+    deaths: {
+      x: new Float32Array(capacity),
+      y: new Float32Array(capacity),
+      n: 0,
+    },
   };
   // Normalize every player to have a harvestable seeds resource (additive).
   for (const p of world.players) {
@@ -90,7 +104,7 @@ export function spawnSeedling(world, opts = {}) {
   s.strength[i] = opts.strength ?? 50;
   s.energy[i] = opts.energy ?? 10;
   s.state[i] = STATE.ORBIT;
-  s.kind[i] = opts.kind ?? 0;
+  s.kind[i] = opts.kind ?? KIND.FIGHTER;
   s.slingRem[i] = 0;
   const cx = a ? a.x : 0;
   const cy = a ? a.y : 0;
@@ -103,30 +117,43 @@ export function spawnSeedling(world, opts = {}) {
   return i;
 }
 
-// killSeedling — swap-remove to keep arrays dense.
+// SoA field names, allocated once — killSeedling runs per-death per-tick, so we must not
+// build this array on every call (GC churn). Keep in sync with makeSeedArrays above.
+const SEED_FIELDS = [
+  "x",
+  "y",
+  "px",
+  "py",
+  "vx",
+  "vy",
+  "home",
+  "target",
+  "dest",
+  "owner",
+  "energy",
+  "strength",
+  "orbitAngle",
+  "orbitRadius",
+  "state",
+  "kind",
+  "slingRem",
+];
+
+// killSeedling — swap-remove to keep arrays dense. Records the dying ship's position into
+// world.deaths first (every death routes through here — combat + black holes) so Render can
+// draw death FX at exact spots instead of guessing from per-frame count deltas.
 export function killSeedling(world, i) {
   const s = world.seed;
+  const d = world.deaths;
+  if (d && d.n < d.x.length) {
+    d.x[d.n] = s.x[i];
+    d.y[d.n] = s.y[i];
+    d.n++;
+  }
   const last = --s.count;
   if (i !== last) {
-    for (const k of [
-      "x",
-      "y",
-      "px",
-      "py",
-      "vx",
-      "vy",
-      "home",
-      "target",
-      "dest",
-      "owner",
-      "energy",
-      "strength",
-      "orbitAngle",
-      "orbitRadius",
-      "state",
-      "kind",
-      "slingRem",
-    ]) {
+    for (let f = 0; f < SEED_FIELDS.length; f++) {
+      const k = SEED_FIELDS[f];
       s[k][i] = s[k][last];
     }
   }
@@ -156,7 +183,10 @@ export function step(world, dt) {
 // killSeedling swap-removes from the dense arrays.
 const BLACKHOLE_KILL_PAD = 54;
 function destroyInBlackHoles(world) {
-  const holes = world.asteroids.filter((a) => a.kind === "blackhole");
+  // Black holes never change after map gen — compute the list once and reuse it.
+  const holes = (world._blackholes ??= world.asteroids.filter(
+    (a) => a.kind === "blackhole",
+  ));
   if (holes.length === 0) return;
   const s = world.seed;
   for (let i = s.count - 1; i >= 0; i--) {

@@ -6,6 +6,7 @@
 import { createGame } from "../Game.js";
 import { createHud } from "./Hud.js";
 import { showStartMenu, showSkirmishSetup, showGameOver } from "./Menus.js";
+import { WORLD_STATUS } from "../Sim/World.js";
 
 export const APP_STATE = {
   MENU: "menu",
@@ -154,7 +155,7 @@ export function createApp(root) {
     if (state === APP_STATE.PLAYING && game) {
       if (hud) hud.update();
       const st = game.world.status;
-      if (st === "won" || st === "lost") toGameOver(st);
+      if (st === WORLD_STATUS.WON || st === WORLD_STATUS.LOST) toGameOver(st);
     }
   }
 

@@ -2,7 +2,7 @@
 // Deterministic: every choice flows through world.rng(); never Math.random. The AI is a
 // pure controller — it issues the SAME commands a human would (sendSeedlings, plantTree)
 // and never mutates SoA arrays or asteroid ownership directly.
-import { OWNER_NEUTRAL, STATE } from "./World.js";
+import { OWNER_NEUTRAL, STATE, WORLD_STATUS } from "./World.js";
 import { sendSeedlings } from "./Seedlings.js";
 import { plantTree } from "./Trees.js";
 
@@ -45,7 +45,8 @@ function knobs(difficulty) {
 }
 
 // Count ORBITing seedlings of `owner` home'd at `rockId` — the pool a send can draw from.
-function orbitersAt(world, rockId, owner) {
+// Orbit-only (unlike Trees.homedCount, which counts all states for the defender cap).
+function deployableAt(world, rockId, owner) {
   const s = world.seed;
   let n = 0;
   for (let i = 0; i < s.count; i++) {
@@ -111,7 +112,7 @@ function decide(world, player) {
   let from = null;
   let pool = 0;
   for (let i = 0; i < owned.length; i++) {
-    const n = orbitersAt(world, owned[i].id, id);
+    const n = deployableAt(world, owned[i].id, id);
     if (n > pool) {
       pool = n;
       from = owned[i];
@@ -143,7 +144,7 @@ function decide(world, player) {
 
 // updateAi — tick every AI player's decision timer; act only when it elapses.
 export function updateAi(world, dt) {
-  if (world.status !== "playing") return;
+  if (world.status !== WORLD_STATUS.PLAYING) return;
   const players = world.players;
   for (let p = 0; p < players.length; p++) {
     const player = players[p];
@@ -175,12 +176,13 @@ function hasPresence(world, pred) {
 }
 
 export function checkVictory(world) {
-  if (world.status === "won" || world.status === "lost") return;
+  if (world.status === WORLD_STATUS.WON || world.status === WORLD_STATUS.LOST)
+    return;
   if (!hasPresence(world, (o) => o === 0)) {
-    world.status = "lost";
+    world.status = WORLD_STATUS.LOST;
     return;
   }
-  if (!hasPresence(world, (o) => o >= 1)) world.status = "won";
+  if (!hasPresence(world, (o) => o >= 1)) world.status = WORLD_STATUS.WON;
 }
 
 export default { updateAi, checkVictory };

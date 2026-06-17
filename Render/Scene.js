@@ -152,6 +152,14 @@ export function createScene(canvas, world) {
   function resize() {
     const w = canvas.clientWidth || window.innerWidth;
     const h = canvas.clientHeight || window.innerHeight;
+    // Refresh device-pixel-ratio so dragging the window to a different-DPR monitor (which
+    // fires resize) re-sharpens the backing store. composer caches its own ratio, so update
+    // both; EffectComposer.setSize already scales render targets by it internally.
+    const pr = Math.min(window.devicePixelRatio, 2);
+    if (renderer.getPixelRatio() !== pr) {
+      renderer.setPixelRatio(pr);
+      if (composer.setPixelRatio) composer.setPixelRatio(pr);
+    }
     renderer.setSize(w, h, false);
     composer.setSize(w, h);
     bloom.setSize(
@@ -203,13 +211,73 @@ export function createScene(canvas, world) {
     applyCamera();
   }
 
-  // --- Right / middle-button drag pan (NOT left — that sends seedlings) ------
+  // --- Camera drag pan: right/middle mouse button (NOT left — that sends seedlings), or
+  //     two-finger touch. Single-finger touch is left to Input.js (select / drag-to-send). --
   let panning = false;
   let panPointer = null;
   let lastPanX = 0;
   let lastPanY = 0;
 
+  // Active touch points + last two-finger pinch state (midpoint + spread).
+  const touchPts = new Map(); // pointerId -> {x, y}
+  let pinchDist = 0;
+  let pinchCx = 0;
+  let pinchCy = 0;
+
+  function twoTouch() {
+    const it = touchPts.values();
+    const a = it.next().value;
+    const b = it.next().value;
+    return {
+      cx: (a.x + b.x) / 2,
+      cy: (a.y + b.y) / 2,
+      dist: Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2),
+    };
+  }
+
+  // Two-finger gesture: pan by the midpoint's movement and zoom by the spread ratio, keeping
+  // the world point under the midpoint fixed (pinch-to-zoom toward the fingers).
+  function handlePinch() {
+    const rect = canvas.getBoundingClientRect();
+    const t = twoTouch();
+    const before = screenToWorld(t.cx, t.cy);
+    if (pinchDist > 0) {
+      zoom = Math.min(
+        MAX_ZOOM,
+        Math.max(MIN_ZOOM, zoom * (t.dist / pinchDist)),
+      );
+    }
+    const wppX = (2 * baseHalfW) / zoom / rect.width;
+    const wppY = (2 * baseHalfH) / zoom / rect.height;
+    centerX -= (t.cx - pinchCx) * wppX;
+    centerY += (t.cy - pinchCy) * wppY;
+    const after = screenToWorld(t.cx, t.cy); // reads updated zoom/center
+    centerX += before.x - after.x;
+    centerY += before.y - after.y;
+    applyCamera();
+    pinchDist = t.dist;
+    pinchCx = t.cx;
+    pinchCy = t.cy;
+  }
+
   function onPointerDown(e) {
+    if (e.pointerType === "touch") {
+      touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      // setPointerCapture throws if the pointer isn't currently active (some browsers /
+      // synthetic events) — capture is a nicety here, not required, so never let it throw.
+      try {
+        canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+      } catch {
+        /* not capturable — fine */
+      }
+      if (touchPts.size === 2) {
+        const t = twoTouch();
+        pinchDist = t.dist;
+        pinchCx = t.cx;
+        pinchCy = t.cy;
+      }
+      return;
+    }
     if (e.button !== 1 && e.button !== 2) return; // middle or right only
     panning = true;
     panPointer = e.pointerId;
@@ -218,6 +286,12 @@ export function createScene(canvas, world) {
     canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
   }
   function onPointerMove(e) {
+    if (e.pointerType === "touch") {
+      if (!touchPts.has(e.pointerId)) return;
+      touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touchPts.size === 2) handlePinch();
+      return;
+    }
     if (!panning || e.pointerId !== panPointer) return;
     const rect = canvas.getBoundingClientRect();
     // World units per screen pixel at the current zoom.
@@ -230,6 +304,16 @@ export function createScene(canvas, world) {
     applyCamera();
   }
   function endPan(e) {
+    if (e && e.pointerType === "touch") {
+      touchPts.delete(e.pointerId);
+      if (touchPts.size === 2) {
+        const t = twoTouch(); // re-seed if dropping from 3→2 fingers
+        pinchDist = t.dist;
+        pinchCx = t.cx;
+        pinchCy = t.cy;
+      }
+      return;
+    }
     if (e && panPointer !== null && e.pointerId !== panPointer) return;
     panning = false;
     panPointer = null;
@@ -238,12 +322,29 @@ export function createScene(canvas, world) {
     e.preventDefault(); // right-drag pan shouldn't pop the browser menu
   }
 
+  // --- WebGL context loss: an unsolicited loss (mobile GPU reset, driver hiccup) would make
+  //     composer.render() throw every frame. preventDefault is REQUIRED for the browser to
+  //     fire 'restored' later. Render is skipped while lost (Game.js checks isContextLost). --
+  let contextLost = false;
+  function onContextLost(e) {
+    e.preventDefault();
+    contextLost = true;
+  }
+  function onContextRestored() {
+    contextLost = false;
+    // three re-initializes GL state on restore; instance buffers re-upload (needsUpdate is
+    // set every frame) and textures re-upload on next use. Re-fit defensively.
+    resize();
+  }
+
   canvas.addEventListener("wheel", onWheel, { passive: false });
   canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerup", endPan);
   canvas.addEventListener("pointercancel", endPan);
   canvas.addEventListener("contextmenu", onContextMenu);
+  canvas.addEventListener("webglcontextlost", onContextLost, false);
+  canvas.addEventListener("webglcontextrestored", onContextRestored, false);
 
   function disposeControls() {
     canvas.removeEventListener("wheel", onWheel);
@@ -252,6 +353,8 @@ export function createScene(canvas, world) {
     canvas.removeEventListener("pointerup", endPan);
     canvas.removeEventListener("pointercancel", endPan);
     canvas.removeEventListener("contextmenu", onContextMenu);
+    canvas.removeEventListener("webglcontextlost", onContextLost);
+    canvas.removeEventListener("webglcontextrestored", onContextRestored);
   }
 
   // Toggle bloom in/out of the render path. OFF renders straight to screen.
@@ -274,6 +377,7 @@ export function createScene(canvas, world) {
     setBloomEnabled,
     disposeControls,
     driftStars,
+    isContextLost: () => contextLost,
     // Live zoom factor (1 = fit-all, >1 = zoomed in).
     getZoom: () => zoom,
     // World units covered by one screen pixel at the current zoom — drives apparent-size

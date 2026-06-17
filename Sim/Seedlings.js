@@ -1,6 +1,6 @@
 // Sim/Seedlings.js — per-tick seedling movement (orbit/transit), sending, and arrival
 // colonization. NO three.js. Combat (COMBAT/DEAD) is deferred to T4.
-import { STATE, OWNER_NEUTRAL } from "./World.js";
+import { STATE, OWNER_NEUTRAL, KIND } from "./World.js";
 
 const TAU = Math.PI * 2;
 const ORBIT_BASE = 1.2; // max angular speed (rad/sec) — caps tiny rocks from whirling
@@ -25,7 +25,7 @@ function aimAt(world, i, node) {
   const s = world.seed;
   const dx = node.x - s.x[i];
   const dy = node.y - s.y[i];
-  const d = Math.hypot(dx, dy) || 1;
+  const d = Math.sqrt(dx * dx + dy * dy) || 1;
   const speed = TRANSIT_BASE * speedFactor(world.asteroids[s.home[i]] || node);
   s.vx[i] = (dx / d) * speed;
   s.vy[i] = (dy / d) * speed;
@@ -59,7 +59,7 @@ export function updateSeedlings(world, dt) {
       }
       const dx = t.x - s.x[i];
       const dy = t.y - s.y[i];
-      const d = Math.hypot(dx, dy);
+      const d = Math.sqrt(dx * dx + dy * dy);
       if (d <= t.radius + ARRIVE_GAP) {
         // Reached this waypoint. The FINAL destination resolves (colonize/fight); an
         // intermediate body is slung around (~70%) before continuing — fighting anything
@@ -146,7 +146,7 @@ function enterSling(world, i, t) {
   const s = world.seed;
   const dx = s.x[i] - t.x;
   const dy = s.y[i] - t.y;
-  const rad = Math.hypot(dx, dy) || t.radius + ARRIVE_GAP;
+  const rad = Math.sqrt(dx * dx + dy * dy) || t.radius + ARRIVE_GAP;
   s.orbitRadius[i] = rad;
   s.orbitAngle[i] = Math.atan2(dy, dx);
   // Continue rotating the way the incoming velocity curves around t (sign of r × v).
@@ -224,7 +224,7 @@ export function updateRally(world, dt) {
     for (let i = 0; i < s.count; i++) {
       if (s.state[i] !== STATE.ORBIT) continue;
       if (s.home[i] !== rock.id || s.owner[i] !== rock.owner) continue;
-      if (s.kind[i] !== 0) continue; // keep defenders home
+      if (s.kind[i] !== KIND.FIGHTER) continue; // keep defenders home
       launchSeedling(world, i, tgt);
     }
   }
@@ -232,7 +232,7 @@ export function updateRally(world, dt) {
 
 // sendSeedlings — dispatch floor(eligible * fraction) ORBITing seedlings of `owner`
 // from `fromId` toward `toId`. Returns count sent. Safe no-op on bad args.
-// Note: if fraction>0 and eligible>=1 but floor(eligible*fraction)===0, sends 0.
+// Note: floor is intentional — a low slider fraction can deliberately send 0 (tested).
 export function sendSeedlings(world, fromId, toId, fraction, owner) {
   if (fromId === toId) return 0;
   const s = world.seed;

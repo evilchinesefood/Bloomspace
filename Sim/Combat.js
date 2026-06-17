@@ -5,7 +5,7 @@
 // INVARIANT (load-bearing): world.asteroids is NEVER removed or reordered here — we only
 // mutate `asteroid.owner`. Seedling home/target are indices into world.asteroids, so any
 // reorder would silently corrupt every seedling's home/target. Only `owner` is touched.
-import { STATE, killSeedling } from "./World.js";
+import { STATE, killSeedling, OWNER_NEUTRAL, MAX_PLAYERS } from "./World.js";
 
 export const CONTACT_RADIUS = 14; // world units; enemies this close trade damage
 export const COMBAT_RATE = 0.1; // damage/sec scalar: energy -= enemyStrength*RATE*dt
@@ -33,11 +33,15 @@ function ensureCap(n) {
 }
 
 // Reused buffers for the same-home engagement pass (no per-tick allocation).
-const MAXO = 8; // max owner id + 1 (1 human + a few AI)
+// owner-id slots (0..MAX_PLAYERS-1). Set lazily on first use, NOT at module load: World.js
+// imports Combat.js before its own MAX_PLAYERS is initialized (circular dep), so reading it
+// at module-eval time throws a TDZ ReferenceError. By the first combat tick it's ready.
+let MAXO = 0;
 let engaged = new Uint8Array(0);
 let strAt = new Float32Array(0); // [asteroid*MAXO + owner] -> strength sum on that rock
 let totAt = new Float32Array(0); // [asteroid] -> total orbiting strength
 function ensureHomeBufs(seedCap, astCount) {
+  if (MAXO === 0) MAXO = MAX_PLAYERS;
   if (engaged.length < seedCap)
     engaged = new Uint8Array(Math.max(seedCap, engaged.length * 2, 256));
   if (strAt.length < astCount * MAXO) strAt = new Float32Array(astCount * MAXO);
@@ -148,6 +152,10 @@ export function resolveCombat(world, dt) {
     if (s.state[i] === STATE.DEAD) killSeedling(world, i);
   }
 
+  // Compaction swap-removed DEAD ships, so the grid built above now holds stale indices.
+  // Rebuild it (O(n)) before flipOwnership queries it by cell — cheaper overall than the
+  // old O(asteroids × seedlings) full scan once ship/rock counts grow.
+  if (s.count > 0) rebuildGrid(world);
   flipOwnership(world);
 }
 
@@ -157,34 +165,47 @@ export function resolveCombat(world, dt) {
 // still present, or 2+ rivals) → no flip. Neutral first-arrival colonization is T2's job.
 //
 // INVARIANT: only asteroid.owner is mutated; the array is never reordered/removed.
-// PERF (T8): this scans all seedlings per owned asteroid — O(asteroids × seedlings). Fine
-// at the v1 scale (~dozens of rocks, few-thousand cap → sub-ms/tick). If rock counts reach
-// the hundreds or the seedling cap grows well past 4k, query the spatial grid cells within
-// `reach` of each rock instead of scanning the whole SoA.
+// Queries only the spatial-grid cells overlapping each rock's hold-zone (radius + HOLD_GAP)
+// instead of scanning the whole seedling SoA — O(asteroids × local-density), not O(n²).
+// Requires a FRESH grid (rebuilt post-compaction by the caller). Semantics are unchanged:
+// position-based reach test, TRANSIT/SLING skipped, owner-present blocks the flip, and a
+// flip happens only when exactly one rival side remains.
 function flipOwnership(world) {
   const s = world.seed;
   const asts = world.asteroids;
   for (let a = 0; a < asts.length; a++) {
     const rock = asts[a];
-    if (rock.owner === -1) continue; // neutral handled by colonization (T2)
+    if (rock.owner === OWNER_NEUTRAL) continue; // neutral handled by colonization (T2)
     const reach = rock.radius + HOLD_GAP;
     const reach2 = reach * reach;
+    const cx0 = Math.floor((rock.x - reach) / CELL);
+    const cx1 = Math.floor((rock.x + reach) / CELL);
+    const cy0 = Math.floor((rock.y - reach) / CELL);
+    const cy1 = Math.floor((rock.y + reach) / CELL);
     let ownerPresent = false;
     let rival = -2; // -2 = none yet, -3 = multiple rivals
-    for (let i = 0; i < s.count; i++) {
-      // Only ships that STOP at a rock hold/capture it — passing TRANSIT and slingshotting
-      // SLING ships fight but never flip ownership just by flying through the hold-zone.
-      if (s.state[i] === STATE.TRANSIT || s.state[i] === STATE.SLING) continue;
-      const dx = s.x[i] - rock.x;
-      const dy = s.y[i] - rock.y;
-      if (dx * dx + dy * dy > reach2) continue;
-      const o = s.owner[i];
-      if (o === rock.owner) {
-        ownerPresent = true;
-        break; // contested by defender — stop early, no flip
+    for (let gx = cx0; gx <= cx1 && !ownerPresent; gx++) {
+      for (let gy = cy0; gy <= cy1 && !ownerPresent; gy++) {
+        const bucket = grid.cells.get(key(gx, gy));
+        if (!bucket) continue;
+        for (let b = 0; b < bucket.length; b++) {
+          const i = bucket[b];
+          // Only ships that STOP at a rock hold/capture it — passing TRANSIT and slingshotting
+          // SLING ships fight but never flip ownership just by flying through the hold-zone.
+          if (s.state[i] === STATE.TRANSIT || s.state[i] === STATE.SLING)
+            continue;
+          const dx = s.x[i] - rock.x;
+          const dy = s.y[i] - rock.y;
+          if (dx * dx + dy * dy > reach2) continue;
+          const o = s.owner[i];
+          if (o === rock.owner) {
+            ownerPresent = true; // contested by defender — stop, no flip
+            break;
+          }
+          if (rival === -2) rival = o;
+          else if (rival !== o) rival = -3;
+        }
       }
-      if (rival === -2) rival = o;
-      else if (rival !== o) rival = -3;
     }
     if (ownerPresent) continue;
     if (rival >= 0) {
