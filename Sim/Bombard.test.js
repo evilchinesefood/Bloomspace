@@ -554,7 +554,6 @@ test("after a destroy: no energy regen / tree growth / orbit / ownership flip on
   destroyBody(w, target.id);
   const x0 = target.x;
   const y0 = target.y;
-  assert.equal(target.energy, target.energy); // captured below
   const e0 = target.energy;
   for (let t = 0; t < 300; t++) Sim.step(w, DT);
   assert.equal(target.dead, true);
@@ -655,7 +654,12 @@ test("AI on a build difficulty eventually arms a battery and fires (deterministi
       for (let i = 0; i < w.events.n; i++)
         if (w.events.type[i] === EVENT.FIRE) fired = true;
     }
-    return { fired, armedSeen, fireCount: w.players[1]._bombFires | 0 };
+    return {
+      fired,
+      armedSeen,
+      fireCount: w.players[1]._bombFires | 0,
+      player: w.players[1],
+    };
   }
   const a = run(31);
   assert.ok(a.armedSeen, "AI should arm a battery given resources + time");
@@ -664,6 +668,23 @@ test("AI on a build difficulty eventually arms a battery and fires (deterministi
   assert.equal(a.fired, b.fired, "same-seed AI bombard is deterministic");
   assert.equal(a.armedSeen, b.armedSeen);
   assert.equal(a.fireCount, b.fireCount);
+
+  // Serialization guard (ahead of save/resume): the AI's bombard counters must stay plain
+  // numbers that survive a JSON round-trip — catch a future _bomb* field becoming a Set/Map.
+  for (const f of [
+    "_bombFires",
+    "_bombPlants",
+    "_bombFireTick",
+    "_bombPlanTick",
+  ])
+    assert.equal(typeof a.player[f], "number", `${f} must be a plain number`);
+  const round = JSON.parse(JSON.stringify(a.player));
+  assert.equal(round._bombFires, a.player._bombFires, "_bombFires round-trips");
+  assert.equal(
+    round._bombPlants,
+    a.player._bombPlants,
+    "_bombPlants round-trips",
+  );
 });
 
 test("Easy AI never builds a bombard battery", () => {

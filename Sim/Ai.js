@@ -256,9 +256,6 @@ function pickBombTarget(world) {
     ) {
       bestO = o;
       best = a;
-    } else if (!best) {
-      bestO = o;
-      best = a;
     }
   }
   return best;
@@ -268,7 +265,7 @@ function pickBombTarget(world) {
 // rock (chosen in decide so normal planting can leave that rock alone to bank energy), then fires
 // it at the human's strongest rock. Paced by per-player decision counters. Returns the host rock
 // id while a battery is being BUILT there (so decide skips it for normal trees), else -1.
-function maybeBombard(world, player, host, k) {
+function maybeBombard(world, player, host) {
   const bk = bombKnobs(player.difficulty);
   if (!bk) return -1; // Easy: no bombard
   const id = player.id;
@@ -338,7 +335,7 @@ function decide(world, player) {
   let reserved = -1;
   if (k.plant && owned.length >= 2) {
     const bombHost = pickBatteryHost(world, owned, id);
-    reserved = maybeBombard(world, player, bombHost, k);
+    reserved = maybeBombard(world, player, bombHost);
   }
 
   // Plant on a strong owned rock first (growth → more seedlings over time). Skip the reserved
