@@ -67,19 +67,27 @@ export function pushEvent(
   e.n++;
 }
 
-// Mulberry32 — small seeded deterministic PRNG -> [0,1).
-function makeRng(seed) {
+// Mulberry32 — small seeded deterministic PRNG -> [0,1). The closure holds a single 32-bit
+// state integer `s`. getState/setState expose/restore exactly that integer (for save/resume)
+// WITHOUT touching the PRNG math, so the numeric sequence is byte-for-byte unchanged; a resumed
+// match restored via setState draws the identical continuation.
+export function makeRng(seed) {
   let s = seed >>> 0;
-  return function () {
+  const rng = function () {
     s |= 0;
     s = (s + 0x6d2b79f5) | 0;
     let t = Math.imul(s ^ (s >>> 15), 1 | s);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+  rng.getState = () => s >>> 0;
+  rng.setState = (v) => {
+    s = v >>> 0;
+  };
+  return rng;
 }
 
-function makeSeedArrays(capacity) {
+export function makeSeedArrays(capacity) {
   return {
     count: 0,
     capacity,
@@ -186,7 +194,7 @@ export function spawnSeedling(world, opts = {}) {
 
 // SoA field names, allocated once — killSeedling runs per-death per-tick, so we must not
 // build this array on every call (GC churn). Keep in sync with makeSeedArrays above.
-const SEED_FIELDS = [
+export const SEED_FIELDS = [
   "x",
   "y",
   "px",
