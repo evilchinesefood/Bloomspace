@@ -6,12 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createWorld, STATE } from "./World.js";
 import { updateEconomy } from "./Economy.js";
-import {
-  updateTrees,
-  plantTree,
-  FLOWER_SEEDS,
-  FLOWER_INTERVAL,
-} from "./Trees.js";
+import { updateTrees, FLOWER_SEEDS } from "./Trees.js";
 import { updateSeedlings } from "./Seedlings.js";
 import { RICH_ENERGY_MULT, RICH_SEED_BONUS, NEBULA_SLOW } from "./MapGen.js";
 
@@ -169,8 +164,6 @@ test("rich rock's flower yields FLOWER_SEEDS + RICH_SEED_BONUS; plain yields FLO
   }
   assert.equal(flowerOnce(true), FLOWER_SEEDS + RICH_SEED_BONUS);
   assert.equal(flowerOnce(false), FLOWER_SEEDS);
-  void plantTree;
-  void FLOWER_INTERVAL;
 });
 
 // --- 4. Nebula effect -----------------------------------------------------------------------

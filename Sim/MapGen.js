@@ -456,12 +456,7 @@ function tagSpecials(world, homes) {
   const homeSet = new Set(homes);
   // Resource-rich: plain habitable asteroids only (not a home, planet, moon, or binary member).
   const rich = asteroids.filter(
-    (a) =>
-      a.kind === "asteroid" &&
-      a.habitable &&
-      !a.moon &&
-      !a.binary &&
-      !homeSet.has(a.id),
+    (a) => a.kind === "asteroid" && !a.moon && !a.binary && !homeSet.has(a.id),
   );
   const want = Math.max(1, Math.floor(asteroids.length / 6));
   // Fisher–Yates partial shuffle (rng-driven) → deterministic pick of `want` distinct rocks.

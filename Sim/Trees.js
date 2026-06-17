@@ -155,9 +155,9 @@ export function updateTrees(world, dt) {
         tree.flowerCd = FLOWER_INTERVAL;
         const player = playerById(world, rock.owner);
         // Resource-rich rocks pay an extra RICH_SEED_BONUS per flower.
-        const yield_ =
+        const payout =
           FLOWER_SEEDS + (rock.special === "rich" ? RICH_SEED_BONUS : 0);
-        if (player) player.seeds = (player.seeds ?? 0) + yield_;
+        if (player) player.seeds = (player.seeds ?? 0) + payout;
       }
     }
   }
