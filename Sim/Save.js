@@ -8,8 +8,8 @@
 //     nebulae, belts, winConfig.
 //   • Derived/transient (NOT serialized, rebuilt on restore): world.nav (rebuildNav), world.
 //     _blackholes (memo → null so it recomputes), world.events (render channel → reinit EMPTY).
-//   • players[i]: id, isAi, difficulty, seeds, tech, and every _-prefixed sim/AI cadence counter
-//     (captured generically — see PLAYER_FIELDS below).
+//   • players[i]: cloned WHOLE (plain object) — id/isAi/difficulty/seeds/tech + every _-prefixed
+//     cadence counter — so a future counter is captured automatically (see PLAYER_SKIP denylist).
 //   • asteroids[i]: plain data objects (id===index, no functions / typed-arrays) — deep-copied
 //     whole. trees + bombard are plain objects; neighbors is the post-belt graph (preserved so
 //     routing resumes identically). Never reordered.
@@ -20,30 +20,19 @@ import { rebuildNav } from "./MapGen.js";
 
 export const SAVE_VERSION = 1;
 
-// Player fields to round-trip: the stable identity/economy fields plus the FULL set of
-// _-prefixed deterministic cadence counters accumulated across F-base/F3/F4/F6a. `tech` is a
-// plain {strength,speed,regen} record. Any counter that's still undefined mid-game is simply
-// omitted (the sim re-inits it lazily) — but the ones that exist are captured so a resumed
-// match keeps identical decision timing.
-const PLAYER_FIELDS = [
-  "id",
-  "isAi",
-  "difficulty",
-  "seeds",
-  "_aiCd",
-  "_aiSends",
-  "_techRR",
-  "_techTick",
-  "_domTicks",
-  "_bombFires",
-  "_bombPlants",
-  "_bombFireTick",
-  "_bombPlanTick",
-];
+// Players are plain objects (id/isAi/difficulty/seeds/tech + a set of _-prefixed deterministic
+// cadence counters accumulated across F-base/F3/F4/F6a). We clone the WHOLE object — same as
+// asteroids — so a NEW counter added by a future feature is captured AUTOMATICALLY rather than
+// silently dropped (which would desync a resumed match with no test failure). A counter that was
+// never set is simply an absent key (the sim re-inits it lazily via `| 0`). Anything transient or
+// derived that should NOT round-trip goes in PLAYER_SKIP (empty today).
+const PLAYER_SKIP = new Set();
 
-// Deep-clone a plain JSON value (objects/arrays/primitives only). Asteroids carry no functions
-// or typed-arrays, so a structural clone is exact and JSON-safe. Used so the saved object never
-// aliases live world state (mutating one must not touch the other).
+// Deep-clone a plain JSON value (objects/arrays/primitives only). Intentionally mirrors JSON
+// semantics (NOT structuredClone) — the saved object must survive a real localStorage string
+// round-trip, so modelling that here surfaces any non-JSON value early instead of at F8b's
+// JSON.stringify. Asteroids/players carry no functions or typed-arrays, so this is exact + safe,
+// and it keeps the save from aliasing live world state.
 function cloneJson(v) {
   if (v === null || typeof v !== "object") return v;
   if (Array.isArray(v)) return v.map(cloneJson);
@@ -65,8 +54,7 @@ export function serialize(world) {
 
   const players = world.players.map((p) => {
     const out = {};
-    for (const k of PLAYER_FIELDS) if (p[k] !== undefined) out[k] = p[k];
-    out.tech = p.tech ? { ...p.tech } : { strength: 0, speed: 0, regen: 0 };
+    for (const k in p) if (!PLAYER_SKIP.has(k)) out[k] = cloneJson(p[k]);
     return out;
   });
 
@@ -108,7 +96,16 @@ function makeEvents(capacity) {
 // silently mis-loaded. Allocates fresh typed arrays (preserving per-field types), restores the
 // rng state integer, rebuilds nav, and reinitializes the transient render channel EMPTY.
 export function deserialize(saved) {
-  if (!saved || saved.version !== SAVE_VERSION) return null;
+  // Reject a version mismatch/miss OR an obviously-corrupt save (the version check alone doesn't
+  // cover a truncated/missing seed) — bad input → null, consistent for every caller (F8b reads
+  // possibly-corrupt localStorage). An oversized field array still throws (F8b wraps in try/catch).
+  if (
+    !saved ||
+    saved.version !== SAVE_VERSION ||
+    !saved.seed ||
+    !saved.seed.fields
+  )
+    return null;
 
   const cap = saved.seed.capacity;
   const seed = makeSeedArrays(cap);
@@ -126,8 +123,8 @@ export function deserialize(saved) {
 
   const players = saved.players.map((sp) => {
     const p = {};
-    for (const k of PLAYER_FIELDS) if (sp[k] !== undefined) p[k] = sp[k];
-    p.tech = sp.tech ? { ...sp.tech } : { strength: 0, speed: 0, regen: 0 };
+    for (const k in sp) p[k] = cloneJson(sp[k]);
+    if (!p.tech) p.tech = { strength: 0, speed: 0, regen: 0 }; // defend an old/partial save
     return p;
   });
 

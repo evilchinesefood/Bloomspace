@@ -3,7 +3,13 @@
 // tech, specials, a built-but-unfired bombard battery, a rally, and in-transit seedlings.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createWorld, step, makeRng } from "./World.js";
+import {
+  createWorld,
+  step,
+  makeRng,
+  makeSeedArrays,
+  SEED_FIELDS,
+} from "./World.js";
 import { serialize, deserialize, SAVE_VERSION } from "./Save.js";
 import { buyTech, TECH } from "./Tech.js";
 import { plantTree } from "./Trees.js";
@@ -336,4 +342,18 @@ test("specials + graph fidelity: nebulae/belts/winConfig + neighbors + nav resto
   // Derived state correctly reset.
   assert.equal(w2._blackholes, null, "_blackholes memo reset to null");
   assert.equal(w2.events.n, 0, "event channel reinitialized empty");
+});
+
+// --- 7. SoA SHAPE GUARD -----------------------------------------------------
+// serialize/deserialize walk SEED_FIELDS; makeSeedArrays defines the actual SoA. If a future
+// field is added to one but not the other, serialize would silently drop it (a resume-desync
+// class of bug). Assert the two can't drift.
+test("SEED_FIELDS exactly matches makeSeedArrays' typed-array fields", () => {
+  const sa = makeSeedArrays(1);
+  const typedKeys = Object.keys(sa).filter((k) => ArrayBuffer.isView(sa[k]));
+  assert.deepEqual(
+    [...SEED_FIELDS].sort(),
+    typedKeys.sort(),
+    "SEED_FIELDS drifted from makeSeedArrays — update both together",
+  );
 });
