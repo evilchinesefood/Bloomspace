@@ -115,9 +115,13 @@ function startStarfield(canvas) {
   };
 }
 
-// Start menu: title + (Resume) + Start + GitHub link, over a scrolling starfield. onNew() starts
-// a fresh match; onResume() (shown only when `hasSave` is true) restores the in-progress match.
-export function showStartMenu(root, { onNew, onResume, hasSave = false }) {
+// Start menu: title + (Resume) + Start + Tutorial + GitHub link, over a scrolling starfield.
+// onNew() starts a fresh match; onResume() (shown only when `hasSave` is true) restores the
+// in-progress match; onTutorial() launches the guided tutorial mode (always available, no save).
+export function showStartMenu(
+  root,
+  { onNew, onResume, onTutorial, hasSave = false },
+) {
   const wrap = overlay("background:#05070f;backdrop-filter:none;");
   const sky = el("canvas", {
     style: "position:absolute;inset:0;width:100%;height:100%;display:block;",
@@ -171,6 +175,24 @@ export function showStartMenu(root, { onNew, onResume, hasSave = false }) {
     onNew();
   });
   card.append(start);
+
+  // Tutorial — a clearly-labeled secondary action below Start/New-Game. Always available (no save
+  // needed): launches the guided, step-gated tutorial mode. Neutral/outline so it reads as
+  // secondary to the brand Resume/Start action above it.
+  if (onTutorial) {
+    const tut = el("wa-button", {
+      variant: "neutral",
+      appearance: "outlined",
+      size: "large",
+      style: "width:100%;margin-top:.6rem;",
+      html: '<i slot="start" class="fa-solid fa-graduation-cap"></i>Tutorial',
+    });
+    tut.addEventListener("click", () => {
+      cleanup();
+      onTutorial();
+    });
+    card.append(tut);
+  }
 
   const gh = el("a", {
     href: "https://github.com/evilchinesefood/Bloomspace",

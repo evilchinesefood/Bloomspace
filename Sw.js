@@ -21,6 +21,7 @@ const SHELL = [
   "Ui/Input.js",
   "Ui/Sound.js",
   "Ui/Persist.js",
+  "Ui/Tutorial.js",
   "Audio/Send.wav",
   "Audio/Capture.wav",
   "Audio/Death.wav",

@@ -6,6 +6,7 @@
 import { createGame } from "../Game.js";
 import { createHud } from "./Hud.js";
 import { showStartMenu, showSkirmishSetup, showGameOver } from "./Menus.js";
+import { createTutorial, TUTORIAL_CONFIG } from "./Tutorial.js";
 import { WORLD_STATUS } from "../Sim/World.js";
 import { writeSave, readSave, hasSave, clearSave } from "./Persist.js";
 
@@ -35,6 +36,8 @@ export function createApp(root) {
   let paused = false;
   let closeOverlay = null; // teardown for the current full-screen overlay
   let gameOverShown = false;
+  let tutorial = null; // the tutorial coachmark controller (non-null ONLY in tutorial mode)
+  let isTutorial = false; // tutorial mode gates autosave OFF so it never writes the real save slot
 
   // --- Autosave: persist the live match to localStorage so a closed/refreshed tab can Resume.
   // Driven two ways: a timer (accumulated off the per-frame tick) and a tab-hide listener. The
@@ -52,6 +55,7 @@ export function createApp(root) {
   // progress — but a terminal world never gets written (toGameOver clears the save instead).
   function autosaveNow() {
     if (state !== APP_STATE.PLAYING || !game) return;
+    if (isTutorial) return; // tutorial must NOT pollute the player's real in-progress save slot
     if (game.world.status !== WORLD_STATUS.PLAYING) return;
     writeSave(game.world);
   }
@@ -103,6 +107,12 @@ export function createApp(root) {
       document.removeEventListener("visibilitychange", visibilityHandler);
       visibilityHandler = null;
     }
+    // Tear down the tutorial coachmark (removes its overlay) and clear tutorial mode.
+    if (tutorial) {
+      tutorial.destroy();
+      tutorial = null;
+    }
+    isTutorial = false;
     autosaveAcc = 0;
     if (hud) {
       hud.destroy();
@@ -129,6 +139,7 @@ export function createApp(root) {
     closeOverlay = showStartMenu(root, {
       onNew: toSetup,
       onResume: resumeMatch,
+      onTutorial: startTutorial,
       hasSave: hasSave(),
     });
   }
@@ -168,6 +179,27 @@ export function createApp(root) {
     game = createGame(canvas, {}, world); // 3rd arg = restored world; skips world generation
     if (game.resize) game.resize(); // fit the restored world to the viewport
     beginPlaying();
+  }
+
+  // startTutorial — the guided tutorial game mode. Builds a match from the FIXED tutorial config
+  // (TUTORIAL_CONFIG: small fixed-seed map, specials off, one passive Easy AI), then attaches the
+  // coachmark controller. Crucially it does NOT clearSave() (the player's real in-progress match
+  // survives playing the tutorial) and sets isTutorial BEFORE beginPlaying so autosave stays OFF
+  // for the whole tutorial — the real save slot is never written. The tutorial mutates no world
+  // state; the player drives every step through the real Input/Hud, the controller only gates.
+  function startTutorial() {
+    clearOverlay();
+    tearDownMatch();
+    isTutorial = true; // set before beginPlaying so the seeded autosave + tab-hide save are inert
+    canvas = freshCanvas();
+    game = createGame(canvas, TUTORIAL_CONFIG);
+    if (game.resize) game.resize();
+    beginPlaying();
+    tutorial = createTutorial(root, {
+      getWorld: () => (game ? game.world : null),
+      getSelectedId: () => (game ? game.input.selectedId() : -1),
+      onSkip: toMenu, // "Skip tutorial" returns to the menu (tearDownMatch drops the coachmark)
+    });
   }
 
   // beginPlaying — shared PLAYING setup for both fresh + resumed matches: reapply quality, reset
@@ -246,7 +278,10 @@ export function createApp(root) {
     gameOverShown = true;
     state = APP_STATE.GAMEOVER;
     paused = true; // freeze the sim behind the overlay
-    clearSave(); // a finished match is not resumable — drop the save so the menu offers no Resume
+    // A finished real match is not resumable — drop its save so the menu offers no Resume. But a
+    // finished TUTORIAL must leave the player's real in-progress save untouched (the tutorial never
+    // wrote it, and clearing here would wipe a real match the player paused to try the tutorial).
+    if (!isTutorial) clearSave();
     closeOverlay = showGameOver(root, status, { onNewGame: toMenu });
   }
 
@@ -271,6 +306,9 @@ export function createApp(root) {
   function tick() {
     if (state === APP_STATE.PLAYING && game) {
       if (hud) hud.update();
+      // Drive the tutorial coachmark (tutorial mode only). Evaluated BEFORE the terminal check so
+      // the final "Defeat the enemy" step registers the win the same frame the Victory screen shows.
+      if (tutorial) tutorial.update();
       const st = game.world.status;
       if (
         st === WORLD_STATUS.WON ||
