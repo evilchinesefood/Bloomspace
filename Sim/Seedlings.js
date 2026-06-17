@@ -9,6 +9,7 @@ import {
   MAX_PLAYERS,
 } from "./World.js";
 import { ownerSpeedMult } from "./Tech.js";
+import { NEBULA_SLOW } from "./MapGen.js";
 
 const TAU = Math.PI * 2;
 const ORBIT_BASE = 1.2; // max angular speed (rad/sec) — caps tiny rocks from whirling
@@ -37,6 +38,19 @@ function spdOf(s, i) {
   return o >= 0 && o < SPD_MAXO ? spdMult[o] : 1;
 }
 
+// Nebula transit penalty for a ship at (px,py): NEBULA_SLOW if inside any nebula, else 1.
+// Allocation-free inline loop over the ≤2 regions. Callers guard on world.nebulae?.length so
+// a specials-off world (empty nebulae) does ZERO extra work here — bit-identical to before.
+function nebulaSlow(neb, px, py) {
+  for (let k = 0; k < neb.length; k++) {
+    const z = neb[k];
+    const dx = px - z.x;
+    const dy = py - z.y;
+    if (dx * dx + dy * dy <= z.radius * z.radius) return NEBULA_SLOW;
+  }
+  return 1;
+}
+
 // Next asteroid to fly to when routing from `fromId` toward final `destId`, using the
 // precomputed nearest-neighbor nav table. Falls back to going direct if no graph exists.
 function nextHop(world, fromId, destId) {
@@ -60,6 +74,9 @@ function aimAt(world, i, node) {
 export function updateSeedlings(world, dt) {
   const s = world.seed;
   loadSpdMult(world); // per-owner speed-tech factor (1.0 = no tech), constant this tick
+  // Nebula regions (Feature 7a): slow transiting/slinging ships passing through. Null/empty
+  // when specials are off ⇒ the per-ship nebula check is skipped entirely (no drift).
+  const neb = world.nebulae && world.nebulae.length ? world.nebulae : null;
   for (let i = 0; i < s.count; i++) {
     const st = s.state[i];
     if (st === STATE.ORBIT) {
@@ -97,7 +114,8 @@ export function updateSeedlings(world, dt) {
       const speed =
         TRANSIT_BASE *
         speedFactor(world.asteroids[s.home[i]] || t) *
-        spdOf(s, i);
+        spdOf(s, i) *
+        (neb ? nebulaSlow(neb, s.x[i], s.y[i]) : 1);
       const move = Math.min(d, speed * dt);
       s.vx[i] = (dx / d) * speed;
       s.vy[i] = (dy / d) * speed;
@@ -115,7 +133,8 @@ export function updateSeedlings(world, dt) {
       const speed =
         TRANSIT_BASE *
         speedFactor(world.asteroids[s.home[i]] || t) *
-        spdOf(s, i);
+        spdOf(s, i) *
+        (neb ? nebulaSlow(neb, s.x[i], s.y[i]) : 1);
       let dAng = (speed / Math.max(1, rad)) * dt;
       if (dAng > Math.abs(s.slingRem[i])) dAng = Math.abs(s.slingRem[i]);
       s.orbitAngle[i] += dir * dAng;

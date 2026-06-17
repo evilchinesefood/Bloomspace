@@ -315,6 +315,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
       planetMax: size.planetMax,
       players,
       seed,
+      specials: true, // terrain specials (rich rocks + nebulae) on for every started match
       winConfig: { mode, timeLimitSecs },
     });
   });

@@ -9,6 +9,7 @@
 import { spawnSeedling, OWNER_NEUTRAL, KIND } from "./World.js";
 import { spendEnergy } from "./Economy.js";
 import { launchSeedling } from "./Seedlings.js";
+import { RICH_SEED_BONUS } from "./MapGen.js";
 import {
   BATTERY_SIZE,
   BOMBARD_SEED_COST,
@@ -153,7 +154,10 @@ export function updateTrees(world, dt) {
       if (tree.flowerCd <= 0) {
         tree.flowerCd = FLOWER_INTERVAL;
         const player = playerById(world, rock.owner);
-        if (player) player.seeds = (player.seeds ?? 0) + FLOWER_SEEDS;
+        // Resource-rich rocks pay an extra RICH_SEED_BONUS per flower.
+        const yield_ =
+          FLOWER_SEEDS + (rock.special === "rich" ? RICH_SEED_BONUS : 0);
+        if (player) player.seeds = (player.seeds ?? 0) + yield_;
       }
     }
   }

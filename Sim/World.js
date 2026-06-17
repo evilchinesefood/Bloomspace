@@ -145,6 +145,10 @@ export function createWorld(config = {}) {
     if (p.seeds === undefined) p.seeds = STARTING_SEEDS;
     initPlayerTech(p);
   }
+  // Terrain specials (Feature 7a): regions live on world.nebulae; per-body tags on rock.special.
+  // Default [] so consumers can read it unconditionally. generateMap (gated on config.specials)
+  // fills it; plain {x,y,radius} numbers + string tags, JSON-serializable for save/resume.
+  world.nebulae = [];
   // Procedurally place asteroids + seed each player's home orbit (deterministic).
   generateMap(world, config, spawnSeedling);
   return world;

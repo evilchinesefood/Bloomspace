@@ -3,6 +3,7 @@
 // neutral rocks (owner -1) never regenerate. Trees spend energy via spendEnergy().
 import { OWNER_NEUTRAL } from "./World.js";
 import { ownerRegenMult } from "./Tech.js";
+import { RICH_ENERGY_MULT } from "./MapGen.js";
 
 export const ENERGY_RATE = 4; // energy/sec at energyStat 100
 export const ENERGY_MAX = 200; // per-asteroid storage cap
@@ -13,9 +14,12 @@ export function updateEconomy(world, dt) {
   for (let a = 0; a < asts.length; a++) {
     const rock = asts[a];
     if (rock.dead || rock.owner === OWNER_NEUTRAL) continue;
-    // Planets regenerate (and store) energy faster via energyMult. The owner's regen-tech
-    // multiplier (1.0 = no tech) additionally scales the REGEN RATE only — not the cap.
-    const mult = rock.energyMult || 1;
+    // Planets regenerate (and store) energy faster via energyMult. A resource-rich rock
+    // (special "rich") adds RICH_ENERGY_MULT as a SEPARATE factor on both rate AND cap — kept
+    // off energyMult so a rich planet earns both. The owner's regen-tech multiplier (1.0 = no
+    // tech) additionally scales the REGEN RATE only — not the cap.
+    const rich = rock.special === "rich" ? RICH_ENERGY_MULT : 1;
+    const mult = (rock.energyMult || 1) * rich;
     const tech = ownerRegenMult(world, rock.owner);
     let e =
       rock.energy + ENERGY_RATE * (rock.energyStat / 100) * mult * tech * dt;

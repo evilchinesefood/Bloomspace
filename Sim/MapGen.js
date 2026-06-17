@@ -23,6 +23,17 @@ const HOME_ENERGY = 100;
 export const STAT_MIN = 20;
 const stat = (rng) => STAT_MIN + Math.round(rng() * (100 - STAT_MIN));
 
+// Terrain specials (Feature 7a) — gated behind config.specials (default OFF, see generateMap).
+// Effects keyed off rock.special / world.nebulae, applied in Economy/Trees/Seedlings. Tags are
+// drawn at the END of generation so a specials-ON world shares the EXACT base layout of a
+// specials-OFF world for the same seed. Plain JSON (string special, {x,y,radius} nebulae) so a
+// later save/resume feature can serialize them.
+export const RICH_ENERGY_MULT = 1.6; // rich rock regen + cap factor (composes with energyMult)
+export const RICH_SEED_BONUS = 1; // extra seeds per flower on a rich rock
+export const NEBULA_SLOW = 0.5; // transit/sling speed multiplier inside a nebula
+const NEBULA_MIN_R = 180;
+const NEBULA_MAX_R = 320;
+
 const PLANET_MIN_R = 112; // ~2x asteroids
 const PLANET_MAX_R = 184;
 const PLANET_STAT_MIN = 55;
@@ -437,6 +448,42 @@ export function tryConnect(world, fromId, toId, owner) {
   return true;
 }
 
+// tagSpecials — run at the END of generation (after homes + seedlings) so it only ADDS tags +
+// nebula regions, never shifting the base layout. Draws rng only here ⇒ a specials-ON world and
+// a specials-OFF world for the same seed share identical positions/stats/homes/seedlings.
+function tagSpecials(world, homes) {
+  const { rng, asteroids } = world;
+  const homeSet = new Set(homes);
+  // Resource-rich: plain habitable asteroids only (not a home, planet, moon, or binary member).
+  const rich = asteroids.filter(
+    (a) =>
+      a.kind === "asteroid" &&
+      a.habitable &&
+      !a.moon &&
+      !a.binary &&
+      !homeSet.has(a.id),
+  );
+  const want = Math.max(1, Math.floor(asteroids.length / 6));
+  // Fisher–Yates partial shuffle (rng-driven) → deterministic pick of `want` distinct rocks.
+  for (let i = 0; i < rich.length && i < want; i++) {
+    const j = i + Math.floor(rng() * (rich.length - i));
+    const tmp = rich[i];
+    rich[i] = rich[j];
+    rich[j] = tmp;
+    rich[i].special = "rich";
+  }
+  // Nebula: 1–2 hazy regions placed within the map bounds.
+  const count = 1 + Math.floor(rng() * 2);
+  const nebulae = [];
+  for (let k = 0; k < count; k++) {
+    const radius = NEBULA_MIN_R + rng() * (NEBULA_MAX_R - NEBULA_MIN_R);
+    const x = radius + rng() * (world.width - 2 * radius);
+    const y = radius + rng() * (world.height - 2 * radius);
+    nebulae.push({ x, y, radius });
+  }
+  world.nebulae = nebulae;
+}
+
 // generateMap — populate world.asteroids, network, and each player's home orbit.
 export function generateMap(world, config = {}, spawnSeedling) {
   const players = world.players;
@@ -484,6 +531,13 @@ export function generateMap(world, config = {}, spawnSeedling) {
       });
     }
   }
+
+  // Terrain specials LAST: tags + nebula regions ADD to a fully-placed world, drawing rng only
+  // now, so a specials-ON world matches a specials-OFF world's base layout for the same seed.
+  // Default OFF (no config.specials) ⇒ no tags + empty nebulae ⇒ the existing tests don't drift.
+  if (config.specials) tagSpecials(world, homes);
+  else world.nebulae = [];
+
   return world;
 }
 

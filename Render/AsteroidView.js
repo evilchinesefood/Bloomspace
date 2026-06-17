@@ -251,10 +251,36 @@ function radialGlowTexture() {
   return _glowTex;
 }
 
+// Soft hazy cloud (colored core → transparent) for nebula zones. Like the glow but with a
+// fuller, foggier falloff so the region reads as a translucent haze, not a point light. Cached
+// module-wide (tinted per-region via the mesh material color).
+let _nebulaTex = null;
+function nebulaTexture() {
+  if (_nebulaTex) return _nebulaTex;
+  const s = 256;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = s;
+  const ctx = cv.getContext("2d");
+  const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  g.addColorStop(0, "rgba(255,255,255,0.85)");
+  g.addColorStop(0.4, "rgba(255,255,255,0.5)");
+  g.addColorStop(0.75, "rgba(255,255,255,0.18)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g;
+  disc(ctx, s);
+  ctx.fill();
+  _nebulaTex = new THREE.CanvasTexture(cv);
+  _nebulaTex.colorSpace = THREE.SRGBColorSpace;
+  return _nebulaTex;
+}
+
 // Textures deliberately cached at module scope and shared across matches — match teardown
 // (Game.disposeSceneGraph) must NOT dispose these, or the next match gets a dead texture.
 export function sharedTextures() {
-  return _glowTex ? [_glowTex] : [];
+  const out = [];
+  if (_glowTex) out.push(_glowTex);
+  if (_nebulaTex) out.push(_nebulaTex);
+  return out;
 }
 
 export function createAsteroidView(scene, world, camCtl, fx) {
@@ -300,6 +326,60 @@ export function createAsteroidView(scene, world, camCtl, fx) {
   rockMesh.count = rockIds.length;
   rockMesh.instanceMatrix.needsUpdate = true;
   scene.add(rockMesh);
+
+  // --- Nebula zones (Feature 7a): a soft translucent haze per world.nebulae region, sitting
+  //     BEHIND the bodies (z behind rocks) so the zone reads as a hazy "hiding" cloud. Built
+  //     once from the static region list; part of the scene graph so teardown reclaims it. ---
+  const NEBULA_HUES = [0x6a4cff, 0x4cc2ff]; // violet + cyan, alternating per region
+  for (let k = 0; k < (world.nebulae || []).length; k++) {
+    const z = world.nebulae[k];
+    const cloud = new THREE.Mesh(
+      new THREE.CircleGeometry(1, 48),
+      new THREE.MeshBasicMaterial({
+        map: nebulaTexture(),
+        color: NEBULA_HUES[k % NEBULA_HUES.length],
+        transparent: true,
+        opacity: 0.32,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    cloud.position.set(z.x, z.y, -2.5); // behind rocks (-2) and rims (-1.9)
+    cloud.scale.set(z.radius, z.radius, 1);
+    cloud.frustumCulled = false;
+    scene.add(cloud);
+  }
+
+  // --- Resource-rich glint (Feature 7a): an additive golden halo on each rich rock so it reads
+  //     as a mineral-rich body (it blooms). One instanced layer over the rich set; static. ---
+  const richIds = [];
+  for (let i = 0; i < n; i++) if (rocks[i].special === "rich") richIds.push(i);
+  if (richIds.length) {
+    const richGlint = new THREE.InstancedMesh(
+      new THREE.CircleGeometry(1, 32),
+      new THREE.MeshBasicMaterial({
+        map: radialGlowTexture(),
+        color: 0xffd24a, // warm gold
+        transparent: true,
+        opacity: 0.5,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+      richIds.length,
+    );
+    richGlint.frustumCulled = false;
+    richGlint.position.z = -1.85; // just over the rock body, under seedlings
+    for (let k = 0; k < richIds.length; k++) {
+      const a = rocks[richIds[k]];
+      const rr = a.radius * 1.7;
+      dummy.position.set(a.x, a.y, 0);
+      dummy.scale.set(rr, rr, 1);
+      dummy.updateMatrix();
+      richGlint.setMatrixAt(k, dummy.matrix);
+    }
+    richGlint.instanceMatrix.needsUpdate = true;
+    scene.add(richGlint);
+  }
 
   for (let i = 0; i < n; i++) {
     const a = rocks[i];

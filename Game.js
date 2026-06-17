@@ -47,6 +47,7 @@ const DEFAULT_CONFIG = {
   asteroidCount: 26,
   planetMin: 1,
   planetMax: 2,
+  specials: true, // terrain specials ON for real matches (tests omit this → no drift)
   players: [
     { id: 0, isAi: false, difficulty: 0 },
     { id: 1, isAi: true, difficulty: 1 },
