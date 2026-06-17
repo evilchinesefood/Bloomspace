@@ -203,6 +203,13 @@ export function createGame(canvas, config = {}) {
       if (ok) sound.play("plant");
       return ok;
     },
+    // Tech-buy wrapper: routes the HUD's tech-panel buy through Input (player 0), firing the
+    // plant SFX on a successful purchase (a satisfying confirm cue; no dedicated tech sound).
+    buyTech: (track) => {
+      const ok = input.tech(track);
+      if (ok) sound.play("plant");
+      return ok;
+    },
     // Read-only flags surfaced for the headless verify harness (reduced-motion + bloom state).
     sceneReducedMotion: scene.reducedMotion,
     get bloomEnabled() {

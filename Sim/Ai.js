@@ -11,6 +11,7 @@ import {
 } from "./World.js";
 import { sendSeedlings } from "./Seedlings.js";
 import { plantTree } from "./Trees.js";
+import { buyTech, techCost, TECH_TRACKS, MAX_TIER } from "./Tech.js";
 
 // Difficulty knobs. 0 Easy · 1 Normal · 2 Hard · 3 Brutal. Higher = decides faster, commits
 // more orbiters, and presses attacks harder. Normal and up DEVELOP (plant trees); Easy never
@@ -22,6 +23,10 @@ import { plantTree } from "./Trees.js";
 //   attack    — willing to attack enemy-held rocks at all
 //   plant     — willing to plant growth/defense trees (develops an economy)
 //   aggression— bias toward attacking over neutral expansion
+//   techChance— per-decision odds of buying a tech tier when comfortably affordable
+//   techBuffer— extra seeds (beyond the tier cost) that must remain after a tech buy, so
+//               tech investment never starves expansion/tree-planting. Higher difficulty
+//               invests MORE (higher chance, smaller required buffer).
 const KNOBS = [
   {
     interval: 3.4,
@@ -29,14 +34,26 @@ const KNOBS = [
     attack: false,
     plant: false,
     aggression: 0.0,
+    techChance: 0,
+    techBuffer: 0,
   },
-  { interval: 2.3, fraction: 0.52, attack: true, plant: true, aggression: 0.3 },
+  {
+    interval: 2.3,
+    fraction: 0.52,
+    attack: true,
+    plant: true,
+    aggression: 0.3,
+    techChance: 0.18,
+    techBuffer: 30,
+  },
   {
     interval: 1.5,
     fraction: 0.64,
     attack: true,
     plant: true,
     aggression: 0.55,
+    techChance: 0.3,
+    techBuffer: 20,
   },
   {
     interval: 0.9,
@@ -44,6 +61,8 @@ const KNOBS = [
     attack: true,
     plant: true,
     aggression: 0.82,
+    techChance: 0.45,
+    techBuffer: 12,
   },
 ];
 function knobs(difficulty) {
@@ -89,6 +108,45 @@ function nearestMatch(world, from, pred) {
   return best;
 }
 
+// maybeBuyTech — deterministic, develop-only tech investment. Picks the lowest-level affordable
+// track (round-robin tiebreak via a per-player counter), buys it on a difficulty-paced cadence,
+// and only spends when seeds comfortably exceed cost + buffer (so tech never starves expansion).
+//
+// Deliberately consumes NO world.rng — it reads only player state + a per-player decision
+// counter. This keeps the shared rng stream untouched, so existing AI tests that don't seed
+// extra seeds (and so never cross the buffer threshold) drift zero bits; only the new feature's
+// observable spend differs. techChance is reinterpreted as a deterministic cadence: buy on
+// roughly every Nth qualifying decision, N = round(1/techChance).
+function maybeBuyTech(world, player, k) {
+  if (k.techChance <= 0) return false;
+  const tech = player.tech;
+  if (!tech) return false;
+  // Find the lowest-level track that's affordable with the buffer; round-robin tiebreak so the
+  // empire spreads investment instead of maxing one line. start advances per qualifying call.
+  const start = player._techRR | 0;
+  let pick = -1;
+  let pickLevel = MAX_TIER;
+  for (let n = 0; n < TECH_TRACKS.length; n++) {
+    const ti = (start + n) % TECH_TRACKS.length;
+    const track = TECH_TRACKS[ti];
+    const level = tech[track] | 0;
+    if (level >= MAX_TIER) continue;
+    const cost = techCost(level);
+    if (cost == null || (player.seeds ?? 0) < cost + k.techBuffer) continue;
+    if (level < pickLevel) {
+      pickLevel = level;
+      pick = ti;
+    }
+  }
+  if (pick < 0) return false; // nothing affordable/available this decision
+  // Deterministic cadence: only act every Nth qualifying decision (N from techChance).
+  const period = Math.max(1, Math.round(1 / k.techChance));
+  player._techTick = (player._techTick | 0) + 1;
+  if (player._techTick % period !== 0) return false;
+  player._techRR = (start + 1) % TECH_TRACKS.length;
+  return buyTech(world, player.id, TECH_TRACKS[pick]);
+}
+
 // One decision for a single AI player: scan owned rocks, expand/attack/grow.
 function decide(world, player) {
   const k = knobs(player.difficulty);
@@ -113,6 +171,10 @@ function decide(world, player) {
       plantTree(world, host.id, type, id);
     }
   }
+
+  // Empire-wide tech investment — same develop gate as planting (Easy never develops). The
+  // seed buffer inside keeps this from starving expansion.
+  if (k.plant) maybeBuyTech(world, player, k);
 
   // Find the owned rock with the largest deployable orbiter pool to attack/expand from.
   let from = null;

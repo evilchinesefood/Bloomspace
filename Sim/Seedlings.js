@@ -1,6 +1,14 @@
 // Sim/Seedlings.js — per-tick seedling movement (orbit/transit), sending, and arrival
 // colonization. NO three.js. Combat (COMBAT/DEAD) is deferred to T4.
-import { STATE, OWNER_NEUTRAL, KIND, EVENT, pushEvent } from "./World.js";
+import {
+  STATE,
+  OWNER_NEUTRAL,
+  KIND,
+  EVENT,
+  pushEvent,
+  MAX_PLAYERS,
+} from "./World.js";
+import { ownerSpeedMult } from "./Tech.js";
 
 const TAU = Math.PI * 2;
 const ORBIT_BASE = 1.2; // max angular speed (rad/sec) — caps tiny rocks from whirling
@@ -11,6 +19,23 @@ const ARRIVE_GAP = 24; // orbit gap added to target.radius for "arrived"
 const SLING_ARC = 0.7 * TAU; // slingshot: sweep ~70% around a passed body before breaking off
 
 const speedFactor = (a) => 0.5 + (a ? a.speedStat : 50) / 100;
+
+// Per-owner speed-tech multiplier, recomputed once per updateSeedlings tick (indexed by owner
+// id 0..MAXO-1; neutral -1 → 1.0). Avoids a per-player lookup inside the per-ship loop. MAXO
+// is read lazily on first tick, NOT at module load (World.js imports this before its own
+// MAX_PLAYERS export initializes — reading it at eval time would throw a TDZ error).
+let SPD_MAXO = 0;
+let spdMult = new Float32Array(0);
+function loadSpdMult(world) {
+  if (SPD_MAXO === 0) SPD_MAXO = MAX_PLAYERS;
+  if (spdMult.length < SPD_MAXO) spdMult = new Float32Array(SPD_MAXO);
+  for (let o = 0; o < SPD_MAXO; o++) spdMult[o] = ownerSpeedMult(world, o);
+}
+// Owner-keyed speed-tech multiplier for one seedling slot (1.0 for neutral/out-of-range).
+function spdOf(s, i) {
+  const o = s.owner[i];
+  return o >= 0 && o < SPD_MAXO ? spdMult[o] : 1;
+}
 
 // Next asteroid to fly to when routing from `fromId` toward final `destId`, using the
 // precomputed nearest-neighbor nav table. Falls back to going direct if no graph exists.
@@ -34,6 +59,7 @@ function aimAt(world, i, node) {
 // updateSeedlings — advance every live seedling one tick.
 export function updateSeedlings(world, dt) {
   const s = world.seed;
+  loadSpdMult(world); // per-owner speed-tech factor (1.0 = no tech), constant this tick
   for (let i = 0; i < s.count; i++) {
     const st = s.state[i];
     if (st === STATE.ORBIT) {
@@ -68,7 +94,10 @@ export function updateSeedlings(world, dt) {
         else enterSling(world, i, t);
         continue;
       }
-      const speed = TRANSIT_BASE * speedFactor(world.asteroids[s.home[i]] || t);
+      const speed =
+        TRANSIT_BASE *
+        speedFactor(world.asteroids[s.home[i]] || t) *
+        spdOf(s, i);
       const move = Math.min(d, speed * dt);
       s.vx[i] = (dx / d) * speed;
       s.vy[i] = (dy / d) * speed;
@@ -83,7 +112,10 @@ export function updateSeedlings(world, dt) {
       }
       const rad = s.orbitRadius[i] || t.radius + ARRIVE_GAP;
       const dir = s.slingRem[i] >= 0 ? 1 : -1;
-      const speed = TRANSIT_BASE * speedFactor(world.asteroids[s.home[i]] || t);
+      const speed =
+        TRANSIT_BASE *
+        speedFactor(world.asteroids[s.home[i]] || t) *
+        spdOf(s, i);
       let dAng = (speed / Math.max(1, rad)) * dt;
       if (dAng > Math.abs(s.slingRem[i])) dAng = Math.abs(s.slingRem[i]);
       s.orbitAngle[i] += dir * dAng;

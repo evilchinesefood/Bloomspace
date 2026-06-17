@@ -13,6 +13,7 @@ import {
   EVENT,
   pushEvent,
 } from "./World.js";
+import { ownerStrengthMult } from "./Tech.js";
 
 export const CONTACT_RADIUS = 14; // world units; enemies this close trade damage
 export const COMBAT_RATE = 0.1; // damage/sec scalar: energy -= enemyStrength*RATE*dt
@@ -47,12 +48,21 @@ let MAXO = 0;
 let engaged = new Uint8Array(0);
 let strAt = new Float32Array(0); // [asteroid*MAXO + owner] -> strength sum on that rock
 let totAt = new Float32Array(0); // [asteroid] -> total orbiting strength
+// Per-owner strength-tech multiplier, recomputed once per tick (indexed by owner id
+// 0..MAXO-1). A constant per-owner factor keeps both damage passes order-independent.
+let strMult = new Float32Array(0);
 function ensureHomeBufs(seedCap, astCount) {
   if (MAXO === 0) MAXO = MAX_PLAYERS;
   if (engaged.length < seedCap)
     engaged = new Uint8Array(Math.max(seedCap, engaged.length * 2, 256));
   if (strAt.length < astCount * MAXO) strAt = new Float32Array(astCount * MAXO);
   if (totAt.length < astCount) totAt = new Float32Array(astCount);
+  if (strMult.length < MAXO) strMult = new Float32Array(MAXO);
+}
+
+// Fill strMult[0..MAXO-1] with each owner's strength-tech multiplier (1.0 = no tech).
+function loadStrMult(world) {
+  for (let o = 0; o < MAXO; o++) strMult[o] = ownerStrengthMult(world, o);
 }
 
 // Pack two 16-bit-ish cell coords into one key. Offset keeps negatives non-negative.
@@ -91,6 +101,7 @@ export function resolveCombat(world, dt) {
 
   const A = world.asteroids.length;
   ensureHomeBufs(s.capacity, A);
+  loadStrMult(world); // per-owner strength-tech factor (1.0 = no tech), constant this tick
   engaged.fill(0, 0, s.count);
 
   // Proximity damage: enemies within CONTACT_RADIUS (fly-bys + converging ships). Damage is
@@ -112,7 +123,9 @@ export function resolveCombat(world, dt) {
           const dy = s.y[j] - yi;
           if (dx * dx + dy * dy > R2) continue;
           engaged[i] = 1;
-          s.energy[i] -= s.strength[j] * COMBAT_RATE * dt;
+          const oj = s.owner[j];
+          const m = oj >= 0 && oj < MAXO ? strMult[oj] : 1;
+          s.energy[i] -= s.strength[j] * m * COMBAT_RATE * dt;
         }
       }
     }
@@ -130,8 +143,11 @@ export function resolveCombat(world, dt) {
     const h = bodyOf(i);
     const o = s.owner[i];
     if (h < 0 || h >= A || o < 0 || o >= MAXO) continue;
-    strAt[h * MAXO + o] += s.strength[i];
-    totAt[h] += s.strength[i];
+    // Bake the owner's strength-tech factor into the per-owner sum so enemyStr below scales
+    // with the attacker's tech, and the pass stays order-independent (constant per-owner).
+    const buffed = s.strength[i] * strMult[o];
+    strAt[h * MAXO + o] += buffed;
+    totAt[h] += buffed;
   }
   for (let i = 0; i < s.count; i++) {
     if (s.state[i] === STATE.TRANSIT) continue;

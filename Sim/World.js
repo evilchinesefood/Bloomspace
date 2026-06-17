@@ -7,6 +7,7 @@ import { resolveCombat } from "./Combat.js";
 import { updateEconomy } from "./Economy.js";
 import { updateTrees } from "./Trees.js";
 import { updateAi, checkVictory } from "./Ai.js";
+import { initPlayerTech } from "./Tech.js";
 
 export const STARTING_SEEDS = 10;
 
@@ -122,9 +123,10 @@ export function createWorld(config = {}) {
       capacity,
     },
   };
-  // Normalize every player to have a harvestable seeds resource (additive).
+  // Normalize every player to have a harvestable seeds resource + a zeroed tech record.
   for (const p of world.players) {
     if (p.seeds === undefined) p.seeds = STARTING_SEEDS;
+    initPlayerTech(p);
   }
   // Procedurally place asteroids + seed each player's home orbit (deterministic).
   generateMap(world, config, spawnSeedling);

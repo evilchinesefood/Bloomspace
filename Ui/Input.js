@@ -8,6 +8,7 @@
 import { sendSeedlings, setRally } from "../Sim/Seedlings.js";
 import { tryConnect } from "../Sim/MapGen.js";
 import { plantTree } from "../Sim/Trees.js";
+import { buyTech } from "../Sim/Tech.js";
 import { ownerColorHex } from "../Render/Palette.js";
 import { WORLD_STATUS } from "../Sim/World.js";
 
@@ -193,6 +194,15 @@ export function createInput({
     return plantTree(world, id, type, HUMAN);
   }
 
+  // Tech-buy action for the HUD's empire-wide tech panel (player 0). Affordability/headroom
+  // are validated inside buyTech; this only routes the human's intent through the sanctioned
+  // call. Returns true if a tier was actually purchased.
+  function tech(track) {
+    const world = getWorld();
+    if (!world) return false;
+    return buyTech(world, HUMAN, track);
+  }
+
   // Escape cancels an armed rally / connect pick (the banner tells the player this is there).
   function onKey(e) {
     if (e.key === "Escape") {
@@ -218,6 +228,7 @@ export function createInput({
 
   return {
     plant,
+    tech,
     selectedId,
     setRallyMode,
     isRallyMode,

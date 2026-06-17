@@ -7,6 +7,7 @@ import { ownerColorHex } from "../Render/Palette.js";
 import { TREE_SEED_COST, TREE_ENERGY_COST } from "../Sim/Trees.js";
 import { CONNECT_ENERGY_COST } from "../Sim/MapGen.js";
 import { KIND } from "../Sim/World.js";
+import { TECH, MAX_TIER, techCost } from "../Sim/Tech.js";
 
 const hex = (n) => "#" + (n >>> 0).toString(16).padStart(6, "0").slice(-6);
 
@@ -32,6 +33,16 @@ function ownedRocks(world, owner) {
 function playerSeeds(world, id) {
   const p = world.players.find((p) => p.id === id);
   return p ? Math.floor(p.seeds ?? 0) : 0;
+}
+function playerTechLevel(world, id, track) {
+  const p = world.players.find((p) => p.id === id);
+  return p && p.tech ? p.tech[track] | 0 : 0;
+}
+// Tier dots like ●●○ for a level out of MAX_TIER.
+function tierDots(level) {
+  let s = "";
+  for (let i = 0; i < MAX_TIER; i++) s += i < level ? "●" : "○";
+  return s;
 }
 // Ships currently ORBITing a given body (state 0), split by your fighters/defenders + enemies.
 function orbitCounts(world, id, me) {
@@ -100,12 +111,135 @@ export function createHud(root, api) {
     speedBtns.set(sp, b);
     group.append(b);
   }
+  const techBtn = el("wa-button", {
+    size: "small",
+    id: "BsTechBtn",
+    html: '<i class="fa-solid fa-flask"></i>',
+    title: "Tech — empire-wide upgrades",
+  });
   const settingsBtn = el("wa-button", {
     size: "small",
     id: "BsSettingsBtn",
     html: '<i class="fa-solid fa-gear"></i>',
   });
-  bar.append(group, settingsBtn);
+  bar.append(group, techBtn, settingsBtn);
+
+  // --- Tech panel (empire-wide upgrades) -------------------------------------
+  // A dedicated top-bar popover (mirrors the settings gear). Three tracks × 3 tiers: each row
+  // shows the name, current tier (●●○), the next-tier cost, and a Buy button disabled when
+  // unaffordable or maxed. Chrome only: reads sim state + calls api.onBuyTech (sanctioned).
+  const TECH_ROWS = [
+    {
+      track: TECH.STRENGTH,
+      label: "Ship Strength",
+      icon: "fa-burst",
+      color: "#ff6b6b",
+    },
+    {
+      track: TECH.SPEED,
+      label: "Transit Speed",
+      icon: "fa-gauge-high",
+      color: "#5ad1ff",
+    },
+    {
+      track: TECH.REGEN,
+      label: "Energy Regen",
+      icon: "fa-bolt",
+      color: "#ffd24b",
+    },
+  ];
+  const techPop = el("wa-popover", {
+    for: "BsTechBtn",
+    placement: "bottom-end",
+  });
+  const techSeedsEl = el("div", {
+    style:
+      "font:600 .8rem system-ui;margin-bottom:.6rem;opacity:.9;color:#5dff9b;",
+    textContent: "",
+  });
+  const techRows = TECH_ROWS.map((def) => {
+    const dots = el("span", {
+      style: `font:700 .9rem system-ui;letter-spacing:2px;color:${def.color};`,
+      textContent: tierDots(0),
+    });
+    const cost = el("span", {
+      style: "font:600 .74rem system-ui;opacity:.8;",
+      textContent: "",
+    });
+    const buyBtn = el("wa-button", {
+      size: "small",
+      variant: "brand",
+      style: "min-width:64px;",
+      textContent: "Buy",
+    });
+    buyBtn.addEventListener(
+      "click",
+      () => api.onBuyTech && api.onBuyTech(def.track),
+    );
+    const row = el(
+      "div",
+      {
+        style:
+          "display:flex;align-items:center;gap:.6rem;margin-bottom:.55rem;",
+      },
+      [
+        el("i", {
+          class: "fa-solid " + def.icon,
+          style: `color:${def.color};width:1rem;text-align:center;`,
+        }),
+        el("div", { style: "flex:1;min-width:120px;" }, [
+          el("div", {
+            style: "font:600 .82rem system-ui;",
+            textContent: def.label,
+          }),
+          el("div", { style: "display:flex;gap:.5rem;align-items:center;" }, [
+            dots,
+            cost,
+          ]),
+        ]),
+        buyBtn,
+      ],
+    );
+    return { def, row, dots, cost, buyBtn };
+  });
+  techPop.append(
+    el("div", { style: "min-width:240px;font:500 .85rem system-ui;" }, [
+      el("div", {
+        style: "font-weight:700;margin-bottom:.5rem;",
+        textContent: "Tech",
+      }),
+      techSeedsEl,
+      ...techRows.map((r) => r.row),
+      el("div", {
+        style: "opacity:.8;font-size:.72rem;line-height:1.3;margin-top:.2rem;",
+        textContent:
+          "Empire-wide buffs — applies to all your bodies and ships.",
+      }),
+    ]),
+  );
+  bar.append(techPop);
+
+  function refreshTech(world) {
+    const seeds = playerSeeds(world, HUMAN);
+    setHtml(techSeedsEl, `<i class="fa-solid fa-seedling"></i> ${seeds} seeds`);
+    for (const r of techRows) {
+      const level = playerTechLevel(world, HUMAN, r.def.track);
+      const dots = tierDots(level);
+      if (r.dots.textContent !== dots) r.dots.textContent = dots;
+      const maxed = level >= MAX_TIER;
+      const cost = maxed ? null : techCost(level);
+      const costTxt = maxed ? "MAX" : `Next: ${cost} seeds`;
+      if (r.cost.textContent !== costTxt) r.cost.textContent = costTxt;
+      const affordable = !maxed && seeds >= cost;
+      setProp(r.buyBtn, "disabled", !affordable);
+      setHtml(r.buyBtn, maxed ? "Max" : "Buy");
+      r.buyBtn.title = maxed
+        ? "All tiers purchased"
+        : affordable
+          ? `Buy tier ${level + 1} for ${cost} seeds`
+          : `Need ${cost} seeds`;
+    }
+  }
 
   // Settings popover: resume + a clean seam for the T8 quality toggle.
   const settings = el("wa-popover", {
@@ -502,6 +636,7 @@ export function createHud(root, api) {
     seedsStat.set(playerSeeds(world, HUMAN));
     rocksStat.set(ownedRocks(world, HUMAN));
     refreshSpeed();
+    refreshTech(world);
     rallyBanner.style.display =
       api.isRallyMode && api.isRallyMode() ? "flex" : "none";
     connectBanner.style.display =

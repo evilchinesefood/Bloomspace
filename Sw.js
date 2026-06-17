@@ -30,6 +30,7 @@ const SHELL = [
   "Audio/AmbientDeep.wav",
   "Audio/AmbientShimmer.wav",
   "Sim/World.js",
+  "Sim/Tech.js",
   "Sim/MapGen.js",
   "Sim/Moons.js",
   "Sim/Seedlings.js",
