@@ -33,6 +33,13 @@ export const RICH_SEED_BONUS = 1; // extra seeds per flower on a rich rock
 export const NEBULA_SLOW = 0.5; // transit/sling speed multiplier inside a nebula
 const NEBULA_MIN_R = 180;
 const NEBULA_MAX_R = 320;
+// Dense belt (Feature 7b): a debris band that blocks direct flight. Anchor–anchor edges that
+// cross a belt are removed from the travel graph (forcing routing/slingshot around it), and a
+// ship physically inside a belt is slowed harder than a nebula. Connectivity is guaranteed:
+// if removal would partition the map, ensureConnected re-adds a minimal gateway edge.
+export const BELT_SLOW = 0.35; // transit/sling speed multiplier inside a belt (< NEBULA_SLOW)
+const BELT_MIN_R = 200;
+const BELT_MAX_R = 340;
 
 const PLANET_MIN_R = 112; // ~2x asteroids
 const PLANET_MAX_R = 184;
@@ -57,6 +64,23 @@ const MOON_SPEED = 0.06; // base angular speed (rad/s) — 50% slower than the p
 
 const TAU = Math.PI * 2;
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+// segHitsCircle — does the segment a→b come within `r` of center (cx,cy)? Standard
+// point-to-segment distance vs radius (closest point clamped to the segment). Used to find
+// travel edges that cross a belt region.
+function segHitsCircle(ax, ay, bx, by, cx, cy, r) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 ? ((cx - ax) * dx + (cy - ay) * dy) / len2 : 0;
+  if (t < 0) t = 0;
+  else if (t > 1) t = 1;
+  const px = ax + t * dx;
+  const py = ay + t * dy;
+  const ex = px - cx;
+  const ey = py - cy;
+  return ex * ex + ey * ey <= r * r;
+}
 
 // Radial space a planet must keep clear around it to fit up to 3 moon rings without clipping.
 function moonEnvelope(ringCount) {
@@ -312,17 +336,63 @@ function assignBinaries(asteroids, blocked, rng, count) {
   return made;
 }
 
+// isLeaf — a body that connects ONLY to its one anchor (a moon, or a binary secondary). Its
+// single parent edge is never a candidate for removal/bridging.
+const isLeaf = (asteroids, i) =>
+  asteroids[i].moon || asteroids[i].binarySecondary;
+
+// ensureConnected — repeatedly add the shortest cross-component ANCHOR–ANCHOR edge to `adj`
+// (array of neighbor Sets, mutated in place) until the whole graph is one component. Leaves
+// hang off their anchor (already linked), so the union-find runs over every body but bridge
+// candidates are non-leaves only. Shared by buildNeighbors (initial bridge) and the belt
+// edge-removal post-pass (re-bridge after crossing edges are cut). NO rng. Same algorithm in
+// both call sites so an OFF world's graph is byte-identical to before this was factored out.
+function ensureConnected(asteroids, adj) {
+  const n = asteroids.length;
+  const parent = asteroids.map((_, i) => i);
+  const find = (x) => {
+    while (parent[x] !== x) x = parent[x] = parent[parent[x]];
+    return x;
+  };
+  const union = (a, b) => (parent[find(a)] = find(b));
+  for (let i = 0; i < n; i++) for (const j of adj[i]) union(i, j);
+  const comps = () => {
+    const r = new Set();
+    for (let i = 0; i < n; i++) r.add(find(i));
+    return r.size;
+  };
+  while (comps() > 1) {
+    let bi = -1;
+    let bj = -1;
+    let bd = Infinity;
+    for (let i = 0; i < n; i++)
+      for (let j = i + 1; j < n; j++) {
+        if (isLeaf(asteroids, i) || isLeaf(asteroids, j) || find(i) === find(j))
+          continue;
+        const d = dist(asteroids[i], asteroids[j]);
+        if (d < bd) {
+          bd = d;
+          bi = i;
+          bj = j;
+        }
+      }
+    if (bi < 0) break;
+    adj[bi].add(bj);
+    adj[bj].add(bi);
+    union(bi, bj);
+  }
+}
+
 // Relative Neighborhood Graph among ANCHOR bodies (everything that isn't a leaf), then a single
 // edge from each leaf to its anchor. Leaves: moons → their parent; binary secondaries → their
 // primary. The star is an anchor (ships can route to and orbit it). RNG ⊃ EMST ⇒ connected.
 function buildNeighbors(asteroids) {
   const n = asteroids.length;
   const adj = asteroids.map(() => new Set());
-  const isLeaf = (i) => asteroids[i].moon || asteroids[i].binarySecondary;
   const anchorOf = (i) =>
     asteroids[i].moon ? asteroids[i].orbitParent : asteroids[i].binaryPartner;
   const nm = [];
-  for (let i = 0; i < n; i++) if (!isLeaf(i)) nm.push(i);
+  for (let i = 0; i < n; i++) if (!isLeaf(asteroids, i)) nm.push(i);
   for (let a = 0; a < nm.length; a++) {
     for (let b = a + 1; b < nm.length; b++) {
       const i = nm[a];
@@ -345,42 +415,12 @@ function buildNeighbors(asteroids) {
     }
   }
   for (let i = 0; i < n; i++)
-    if (isLeaf(i) && anchorOf(i) >= 0) {
+    if (isLeaf(asteroids, i) && anchorOf(i) >= 0) {
       adj[i].add(anchorOf(i));
       adj[anchorOf(i)].add(i);
     }
   // Bridge disconnected ANCHOR components (leaves hang off their anchor).
-  const parent = asteroids.map((_, i) => i);
-  const find = (x) => {
-    while (parent[x] !== x) x = parent[x] = parent[parent[x]];
-    return x;
-  };
-  const union = (a, b) => (parent[find(a)] = find(b));
-  for (let i = 0; i < n; i++) for (const j of adj[i]) union(i, j);
-  const comps = () => {
-    const r = new Set();
-    for (let i = 0; i < n; i++) r.add(find(i));
-    return r.size;
-  };
-  while (comps() > 1) {
-    let bi = -1;
-    let bj = -1;
-    let bd = Infinity;
-    for (let i = 0; i < n; i++)
-      for (let j = i + 1; j < n; j++) {
-        if (isLeaf(i) || isLeaf(j) || find(i) === find(j)) continue;
-        const d = dist(asteroids[i], asteroids[j]);
-        if (d < bd) {
-          bd = d;
-          bi = i;
-          bj = j;
-        }
-      }
-    if (bi < 0) break;
-    adj[bi].add(bj);
-    adj[bj].add(bi);
-    union(bi, bj);
-  }
+  ensureConnected(asteroids, adj);
   return adj.map((s) => Array.from(s).sort((a, b) => a - b));
 }
 
@@ -477,6 +517,53 @@ function tagSpecials(world, homes) {
     nebulae.push({ x, y, radius });
   }
   world.nebulae = nebulae;
+
+  // Dense belt: ONE debris band placed near the map center (where it plausibly sits between
+  // bodies) with a small rng jitter, so straight travel across the middle is impeded. Plain
+  // {x,y,radius} numbers (serializable for save/resume). Placed in open space — the radius is a
+  // meaningful fraction of the map so several anchor edges cross it.
+  const bRadius = BELT_MIN_R + rng() * (BELT_MAX_R - BELT_MIN_R);
+  const bx = world.width / 2 + (rng() - 0.5) * world.width * 0.3;
+  const by = world.height / 2 + (rng() - 0.5) * world.height * 0.3;
+  world.belts = [{ x: bx, y: by, radius: bRadius }];
+  applyBeltEdgeRemoval(world);
+}
+
+// applyBeltEdgeRemoval — POST-PASS on the already-built graph. For every ANCHOR–ANCHOR edge
+// (never a leaf's single parent edge), drop it if the body-to-body segment crosses any belt
+// circle — this forces ships to route AROUND the belt. After removal the graph may be
+// disconnected, so ensureConnected re-adds the minimal cross-component anchor edge(s); a
+// re-added "gateway" edge MAY cross the belt (a belt impedes but must never make a body
+// unreachable). Mutates each body's .neighbors and rebuilds world.nav. NO rng — runs purely on
+// the static graph + belt geometry, so it never shifts the base body/home/seedling layout.
+export function applyBeltEdgeRemoval(world) {
+  const { asteroids, belts } = world;
+  if (!belts || belts.length === 0) return;
+  const n = asteroids.length;
+  // Rebuild the adjacency as Sets from the current neighbor lists.
+  const adj = asteroids.map((a) => new Set(a.neighbors));
+  const crosses = (i, j) => {
+    const a = asteroids[i];
+    const b = asteroids[j];
+    for (const z of belts)
+      if (segHitsCircle(a.x, a.y, b.x, b.y, z.x, z.y, z.radius)) return true;
+    return false;
+  };
+  for (let i = 0; i < n; i++) {
+    if (isLeaf(asteroids, i)) continue; // a leaf keeps its only (parent) edge
+    for (const j of [...adj[i]]) {
+      if (j <= i || isLeaf(asteroids, j)) continue; // skip leaf edges + dedupe (i<j once)
+      if (crosses(i, j)) {
+        adj[i].delete(j);
+        adj[j].delete(i);
+      }
+    }
+  }
+  // Re-bridge any components the removal split off (same logic buildNeighbors uses).
+  ensureConnected(asteroids, adj);
+  for (let i = 0; i < n; i++)
+    asteroids[i].neighbors = Array.from(adj[i]).sort((a, b) => a - b);
+  rebuildNav(world);
 }
 
 // generateMap — populate world.asteroids, network, and each player's home orbit.
@@ -531,9 +618,18 @@ export function generateMap(world, config = {}, spawnSeedling) {
   // now, so a specials-ON world matches a specials-OFF world's base layout for the same seed.
   // Default OFF (no config.specials) ⇒ no tags + empty nebulae ⇒ the existing tests don't drift.
   if (config.specials) tagSpecials(world, homes);
-  else world.nebulae = [];
+  else {
+    world.nebulae = [];
+    world.belts = [];
+  }
 
   return world;
 }
 
-export default { generateMap, buildNav, rebuildNav, addConnection };
+export default {
+  generateMap,
+  buildNav,
+  rebuildNav,
+  addConnection,
+  applyBeltEdgeRemoval,
+};

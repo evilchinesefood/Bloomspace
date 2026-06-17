@@ -145,10 +145,12 @@ export function createWorld(config = {}) {
     if (p.seeds === undefined) p.seeds = STARTING_SEEDS;
     initPlayerTech(p);
   }
-  // Terrain specials (Feature 7a): regions live on world.nebulae; per-body tags on rock.special.
-  // Default [] so consumers can read it unconditionally. generateMap (gated on config.specials)
-  // fills it; plain {x,y,radius} numbers + string tags, JSON-serializable for save/resume.
+  // Terrain specials: regions live on world.nebulae (7a) + world.belts (7b); per-body tags on
+  // rock.special. Default [] so consumers can read them unconditionally. generateMap (gated on
+  // config.specials) fills them; plain {x,y,radius} numbers + string tags, JSON-serializable for
+  // save/resume. Belts also remove the travel edges that cross them (graph reshaped, not bodies).
   world.nebulae = [];
+  world.belts = [];
   // Procedurally place asteroids + seed each player's home orbit (deterministic).
   generateMap(world, config, spawnSeedling);
   return world;

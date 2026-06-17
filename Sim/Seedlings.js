@@ -9,7 +9,7 @@ import {
   MAX_PLAYERS,
 } from "./World.js";
 import { ownerSpeedMult } from "./Tech.js";
-import { NEBULA_SLOW } from "./MapGen.js";
+import { NEBULA_SLOW, BELT_SLOW } from "./MapGen.js";
 
 const TAU = Math.PI * 2;
 const ORBIT_BASE = 1.2; // max angular speed (rad/sec) — caps tiny rocks from whirling
@@ -38,17 +38,27 @@ function spdOf(s, i) {
   return o >= 0 && o < SPD_MAXO ? spdMult[o] : 1;
 }
 
-// Nebula transit penalty for a ship at (px,py): NEBULA_SLOW if inside any nebula, else 1.
-// Allocation-free inline loop over the ≤2 regions. Callers guard on world.nebulae?.length so
-// a specials-off world (empty nebulae) does ZERO extra work here — bit-identical to before.
-function nebulaSlow(neb, px, py) {
-  for (let k = 0; k < neb.length; k++) {
-    const z = neb[k];
-    const dx = px - z.x;
-    const dy = py - z.y;
-    if (dx * dx + dy * dy <= z.radius * z.radius) return NEBULA_SLOW;
-  }
-  return 1;
+// Region transit penalty for a ship at (px,py): the product of NEBULA_SLOW for each nebula it's
+// inside and BELT_SLOW for each belt it's inside (composes if zones overlap), else 1.
+// Allocation-free inline loops over the handful of regions. Callers pass null for an empty
+// region list so a specials-off world does ZERO extra work here — bit-identical to before.
+function regionSlow(neb, belts, px, py) {
+  let f = 1;
+  if (neb)
+    for (let k = 0; k < neb.length; k++) {
+      const z = neb[k];
+      const dx = px - z.x;
+      const dy = py - z.y;
+      if (dx * dx + dy * dy <= z.radius * z.radius) f *= NEBULA_SLOW;
+    }
+  if (belts)
+    for (let k = 0; k < belts.length; k++) {
+      const z = belts[k];
+      const dx = px - z.x;
+      const dy = py - z.y;
+      if (dx * dx + dy * dy <= z.radius * z.radius) f *= BELT_SLOW;
+    }
+  return f;
 }
 
 // Next asteroid to fly to when routing from `fromId` toward final `destId`, using the
@@ -74,9 +84,11 @@ function aimAt(world, i, node) {
 export function updateSeedlings(world, dt) {
   const s = world.seed;
   loadSpdMult(world); // per-owner speed-tech factor (1.0 = no tech), constant this tick
-  // Nebula regions (Feature 7a): slow transiting/slinging ships passing through. Null/empty
-  // when specials are off ⇒ the per-ship nebula check is skipped entirely (no drift).
+  // Terrain regions: nebulae (7a) + belts (7b) slow transiting/slinging ships passing through.
+  // Null when empty (specials off) ⇒ the per-ship region check is skipped entirely (no drift).
   const neb = world.nebulae && world.nebulae.length ? world.nebulae : null;
+  const belts = world.belts && world.belts.length ? world.belts : null;
+  const slowRegions = neb || belts;
   for (let i = 0; i < s.count; i++) {
     const st = s.state[i];
     if (st === STATE.ORBIT) {
@@ -115,7 +127,7 @@ export function updateSeedlings(world, dt) {
         TRANSIT_BASE *
         speedFactor(world.asteroids[s.home[i]] || t) *
         spdOf(s, i) *
-        (neb ? nebulaSlow(neb, s.x[i], s.y[i]) : 1);
+        (slowRegions ? regionSlow(neb, belts, s.x[i], s.y[i]) : 1);
       const move = Math.min(d, speed * dt);
       s.vx[i] = (dx / d) * speed;
       s.vy[i] = (dy / d) * speed;
@@ -134,7 +146,7 @@ export function updateSeedlings(world, dt) {
         TRANSIT_BASE *
         speedFactor(world.asteroids[s.home[i]] || t) *
         spdOf(s, i) *
-        (neb ? nebulaSlow(neb, s.x[i], s.y[i]) : 1);
+        (slowRegions ? regionSlow(neb, belts, s.x[i], s.y[i]) : 1);
       let dAng = (speed / Math.max(1, rad)) * dt;
       if (dAng > Math.abs(s.slingRem[i])) dAng = Math.abs(s.slingRem[i]);
       s.orbitAngle[i] += dir * dAng;

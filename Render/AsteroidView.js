@@ -274,12 +274,56 @@ function nebulaTexture() {
   return _nebulaTex;
 }
 
+// Dense-belt debris band (Feature 7b): a dusty DARK disc — opaque-ish murky core fading to
+// transparent — speckled with scattered rock dots. Distinct from the nebula's light additive
+// haze: this reads as a dirty, solid debris field that ships route around. Cached module-wide.
+let _beltTex = null;
+function beltTexture() {
+  if (_beltTex) return _beltTex;
+  const s = 256;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = s;
+  const ctx = cv.getContext("2d");
+  // Murky dust base: dark dusty-brown core fading to transparent at the edge.
+  const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  g.addColorStop(0, "rgba(54,46,38,0.9)");
+  g.addColorStop(0.55, "rgba(44,38,32,0.6)");
+  g.addColorStop(0.85, "rgba(30,26,22,0.22)");
+  g.addColorStop(1, "rgba(20,18,16,0)");
+  ctx.fillStyle = g;
+  disc(ctx, s);
+  ctx.fill();
+  // Scattered debris dots clipped to the disc (deterministic seeded scatter).
+  ctx.save();
+  disc(ctx, s);
+  ctx.clip();
+  const rnd = rngFrom(0x5e17);
+  for (let i = 0; i < 220; i++) {
+    const a = rnd() * Math.PI * 2;
+    const rr = Math.sqrt(rnd()) * s * 0.48; // uniform area fill
+    const px = s / 2 + Math.cos(a) * rr;
+    const py = s / 2 + Math.sin(a) * rr;
+    const sz = 0.6 + rnd() * 2.4;
+    const sh = 120 + Math.floor(rnd() * 90); // grey→tan rocks
+    ctx.globalAlpha = 0.25 + rnd() * 0.5;
+    ctx.fillStyle = `rgb(${sh},${sh - 18},${sh - 36})`;
+    ctx.beginPath();
+    ctx.arc(px, py, sz, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  _beltTex = new THREE.CanvasTexture(cv);
+  _beltTex.colorSpace = THREE.SRGBColorSpace;
+  return _beltTex;
+}
+
 // Textures deliberately cached at module scope and shared across matches — match teardown
 // (Game.disposeSceneGraph) must NOT dispose these, or the next match gets a dead texture.
 export function sharedTextures() {
   const out = [];
   if (_glowTex) out.push(_glowTex);
   if (_nebulaTex) out.push(_nebulaTex);
+  if (_beltTex) out.push(_beltTex);
   return out;
 }
 
@@ -348,6 +392,27 @@ export function createAsteroidView(scene, world, camCtl, fx) {
     cloud.scale.set(z.radius, z.radius, 1);
     cloud.frustumCulled = false;
     scene.add(cloud);
+  }
+
+  // --- Dense belts (Feature 7b): a dusty DARK debris band per world.belts region. Normal
+  //     (NOT additive) alpha blend so it darkens/obscures rather than glowing like a nebula —
+  //     the visual cue that ships route AROUND it. Sits behind the bodies; built once from the
+  //     static region list; part of the scene graph so teardown reclaims it. ---
+  for (let k = 0; k < (world.belts || []).length; k++) {
+    const z = world.belts[k];
+    const band = new THREE.Mesh(
+      new THREE.CircleGeometry(1, 48),
+      new THREE.MeshBasicMaterial({
+        map: beltTexture(),
+        transparent: true,
+        opacity: 0.85,
+        depthWrite: false,
+      }),
+    );
+    band.position.set(z.x, z.y, -2.4); // behind rocks (-2), just in front of nebulae (-2.5)
+    band.scale.set(z.radius, z.radius, 1);
+    band.frustumCulled = false;
+    scene.add(band);
   }
 
   // --- Resource-rich glint (Feature 7a): an additive golden halo on each rich rock so it reads

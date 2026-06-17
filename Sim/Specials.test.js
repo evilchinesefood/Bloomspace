@@ -8,7 +8,13 @@ import { createWorld, STATE } from "./World.js";
 import { updateEconomy } from "./Economy.js";
 import { updateTrees, FLOWER_SEEDS } from "./Trees.js";
 import { updateSeedlings } from "./Seedlings.js";
-import { RICH_ENERGY_MULT, RICH_SEED_BONUS, NEBULA_SLOW } from "./MapGen.js";
+import {
+  RICH_ENERGY_MULT,
+  RICH_SEED_BONUS,
+  NEBULA_SLOW,
+  BELT_SLOW,
+  applyBeltEdgeRemoval,
+} from "./MapGen.js";
 
 const DT = 1 / 30;
 const PLAYERS = [
@@ -62,10 +68,11 @@ test("nebula entries are plain {x,y,radius} numbers (JSON-serializable for save/
 });
 
 // --- 2. Default OFF = no drift; specials only ADD -------------------------------------------
-test("specials OFF (default): no rich rocks, empty nebulae", () => {
+test("specials OFF (default): no rich rocks, empty nebulae, empty belts", () => {
   const off = mk(1234, false);
   assert.equal(richIds(off).length, 0, "no rich rocks when off");
   assert.deepEqual(off.nebulae, [], "nebulae empty when off");
+  assert.deepEqual(off.belts, [], "belts empty when off");
   const dflt = createWorld({
     seed: 1234,
     asteroidCount: 26,
@@ -75,11 +82,15 @@ test("specials OFF (default): no rich rocks, empty nebulae", () => {
   });
   assert.equal(richIds(dflt).length, 0, "omitting specials = off");
   assert.deepEqual(dflt.nebulae, []);
+  assert.deepEqual(dflt.belts, []);
 });
 
-test("specials ON shares the EXACT base layout of specials OFF for the same seed", () => {
-  // Specials are tagged at the END, drawing rng only then ⇒ positions/stats/homes/seedlings
-  // must be byte-identical between an ON world and an OFF world of the same seed.
+test("specials ON shares the EXACT base body+seedling layout of specials OFF (belts reshape only the graph)", () => {
+  // Specials are tagged at the END, drawing rng only then ⇒ the PLACEMENT layer (positions,
+  // stats, owner, homes, seedlings) must be byte-identical between an ON world and an OFF world
+  // of the same seed. NOTE: belts (7b) legitimately REMOVE travel edges that cross them, so
+  // `neighbors` is NOT asserted equal here — the body layout is untouched, only routing changes.
+  // Edge-removal + the always-connected invariant are covered by the belt tests below.
   const off = mk(4242, false);
   const on = mk(4242, true);
   assert.equal(off.asteroids.length, on.asteroids.length);
@@ -106,7 +117,6 @@ test("specials ON shares the EXACT base layout of specials OFF for the same seed
     ]) {
       assert.equal(a[f], b[f], `body ${i} field ${f} drifted with specials on`);
     }
-    assert.deepEqual(a.neighbors, b.neighbors, `body ${i} neighbors drifted`);
   }
   // Seedlings (homes seeded identically) — same count + positions.
   assert.equal(off.seed.count, on.seed.count, "seedling count drifted");
@@ -221,6 +231,238 @@ test("nebulaSlow factor matches NEBULA_SLOW (sanity on the constant)", () => {
     NEBULA_SLOW > 0 && NEBULA_SLOW < 1,
     "nebula slow must be a slowdown",
   );
+});
+
+// --- 4b. Dense belt (Feature 7b) ------------------------------------------------------------
+const isLeaf = (a) => a.moon || a.binarySecondary;
+// Segment a→b within `r` of belt center (mirror of MapGen.segHitsCircle, for test assertions).
+function segHitsCircle(ax, ay, bx, by, cx, cy, r) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 ? ((cx - ax) * dx + (cy - ay) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const ex = ax + t * dx - cx;
+  const ey = ay + t * dy - cy;
+  return ex * ex + ey * ey <= r * r;
+}
+// True if the travel graph (each body's .neighbors) is one connected component.
+function isConnected(w) {
+  const n = w.asteroids.length;
+  const seen = new Uint8Array(n);
+  const q = [0];
+  seen[0] = 1;
+  let qi = 0;
+  while (qi < q.length)
+    for (const nb of w.asteroids[q[qi++]].neighbors)
+      if (!seen[nb]) {
+        seen[nb] = 1;
+        q.push(nb);
+      }
+  return seen.reduce((a, b) => a + b, 0) === n;
+}
+
+test("same seed + specials ⇒ identical belts; different seed differs", () => {
+  const a = mk(1234, true);
+  const b = mk(1234, true);
+  const c = mk(9999, true);
+  assert.deepEqual(a.belts, b.belts, "belts must be deterministic");
+  assert.ok(a.belts.length >= 1, "at least one belt generated");
+  assert.notDeepEqual(a.belts, c.belts, "belts should differ across seeds");
+});
+
+test("belt entries are plain {x,y,radius} numbers (JSON-serializable for save/resume)", () => {
+  const w = mk(1234, true);
+  for (const z of w.belts) {
+    assert.equal(Object.keys(z).sort().join(","), "radius,x,y");
+    for (const k of ["x", "y", "radius"]) {
+      assert.equal(typeof z[k], "number");
+      assert.ok(Number.isFinite(z[k]));
+    }
+  }
+  assert.deepEqual(JSON.parse(JSON.stringify(w.belts)), w.belts);
+});
+
+test("a hand-placed belt removes the direct edge between two anchors but leaves them connected", () => {
+  // Controlled scenario: find two NON-leaf neighbors with no belt between them in an OFF world,
+  // drop a belt straddling their midpoint, re-run the edge-removal post-pass, and assert their
+  // direct edge is gone yet the graph stays fully connected (routing changed, not partitioned).
+  const w = mk(31415, false); // OFF ⇒ pristine graph to mutate by hand
+  let pi = -1;
+  let pj = -1;
+  outer: for (let i = 0; i < w.asteroids.length; i++) {
+    if (isLeaf(w.asteroids[i])) continue;
+    for (const j of w.asteroids[i].neighbors) {
+      if (j <= i || isLeaf(w.asteroids[j])) continue;
+      pi = i;
+      pj = j;
+      break outer;
+    }
+  }
+  assert.ok(pi >= 0, "found an anchor-anchor edge to block");
+  const A = w.asteroids[pi];
+  const B = w.asteroids[pj];
+  // Tight belt centered on the A–B midpoint: small enough to hit only this segment cleanly.
+  w.belts = [{ x: (A.x + B.x) / 2, y: (A.y + B.y) / 2, radius: 40 }];
+  assert.ok(
+    segHitsCircle(A.x, A.y, B.x, B.y, w.belts[0].x, w.belts[0].y, 40),
+    "belt straddles the A-B segment",
+  );
+  applyBeltEdgeRemoval(w);
+  assert.ok(
+    !A.neighbors.includes(pj) && !B.neighbors.includes(pi),
+    "the direct A-B edge was removed",
+  );
+  assert.ok(isConnected(w), "graph still fully connected after removal");
+});
+
+test("procedural belt removes ≥1 crossing anchor edge and the graph stays connected", () => {
+  // The OFF graph has some anchor edges crossing where the ON belt lands; assert at least one is
+  // ABSENT in the ON graph, and the ON graph is fully connected with every leaf keeping its
+  // parent edge.
+  const seed = 246810;
+  const off = mk(seed, false);
+  const on = mk(seed, true);
+  const belts = on.belts;
+  assert.ok(belts.length >= 1);
+  // Count anchor-anchor OFF edges that cross a belt but are gone in the ON graph.
+  let removed = 0;
+  for (let i = 0; i < off.asteroids.length; i++) {
+    if (isLeaf(off.asteroids[i])) continue;
+    for (const j of off.asteroids[i].neighbors) {
+      if (j <= i || isLeaf(off.asteroids[j])) continue;
+      const A = off.asteroids[i];
+      const B = off.asteroids[j];
+      const crosses = belts.some((z) =>
+        segHitsCircle(A.x, A.y, B.x, B.y, z.x, z.y, z.radius),
+      );
+      if (crosses && !on.asteroids[i].neighbors.includes(j)) removed++;
+    }
+  }
+  assert.ok(
+    removed >= 1,
+    `expected ≥1 belt-crossing edge removed, got ${removed}`,
+  );
+  assert.ok(
+    isConnected(on),
+    "ON graph fully connected after belt edge removal",
+  );
+  // Every leaf still has its single parent edge.
+  for (const a of on.asteroids) {
+    if (isLeaf(a)) {
+      const parent = a.moon ? a.orbitParent : a.binaryPartner;
+      assert.ok(
+        a.neighbors.includes(parent),
+        `leaf ${a.id} lost its parent edge`,
+      );
+    }
+  }
+});
+
+test("belt connectivity invariant holds across many seeds (id===index too)", () => {
+  for (const seed of [3, 17, 88, 404, 1024, 65535, 271828, 8675309]) {
+    const w = mk(seed, true);
+    assert.ok(
+      w.asteroids.every((a, i) => a.id === i),
+      `id===index seed ${seed}`,
+    );
+    assert.ok(w.belts.length >= 1, `belt placed for seed ${seed}`);
+    assert.ok(isConnected(w), `graph connected for seed ${seed}`);
+  }
+});
+
+test("a ship transiting through a belt covers less ground than with no belt", () => {
+  // Same controlled straight-line transit as the nebula test, but with a belt straddling the
+  // path; composes with the existing slow machinery.
+  function run(withBelt) {
+    const w = mk(555, true);
+    const s = w.seed;
+    const home = w.asteroids[0];
+    const target = w.asteroids[1];
+    home.x = 200;
+    home.y = 1000;
+    home.radius = 30;
+    home.speedStat = 50;
+    target.x = 1800;
+    target.y = 1000;
+    target.radius = 30;
+    target.owner = -1;
+    home.owner = 0;
+    w.nebulae = [];
+    w.belts = withBelt ? [{ x: 1000, y: 1000, radius: 300 }] : [];
+    s.count = 0;
+    const i = 0;
+    s.count = 1;
+    s.home[i] = home.id;
+    s.owner[i] = 0;
+    s.state[i] = STATE.TRANSIT;
+    s.target[i] = target.id;
+    s.dest[i] = target.id;
+    s.x[i] = home.x;
+    s.y[i] = home.y;
+    s.energy[i] = 50;
+    s.strength[i] = 50;
+    let ticks = 0;
+    while (s.state[i] === STATE.TRANSIT && ticks < 8000) {
+      updateSeedlings(w, DT);
+      ticks++;
+    }
+    return ticks;
+  }
+  const clear = run(false);
+  const dusty = run(true);
+  assert.ok(
+    dusty > clear,
+    `belt transit should take MORE ticks (clear=${clear}, dusty=${dusty})`,
+  );
+});
+
+test("BELT_SLOW is a slowdown and stronger than NEBULA_SLOW", () => {
+  assert.ok(BELT_SLOW > 0 && BELT_SLOW < 1, "belt slow must be a slowdown");
+  assert.ok(BELT_SLOW < NEBULA_SLOW, "a belt impedes harder than a nebula");
+});
+
+test("belt + nebula slows COMPOSE (overlapping regions multiply)", () => {
+  // A ship inside both a nebula AND a belt should be slower than inside either alone.
+  function ticksFor(neb, belt) {
+    const w = mk(99, true);
+    const s = w.seed;
+    const home = w.asteroids[0];
+    const target = w.asteroids[1];
+    home.x = 200;
+    home.y = 1000;
+    home.radius = 30;
+    home.speedStat = 50;
+    target.x = 1800;
+    target.y = 1000;
+    target.radius = 30;
+    target.owner = -1;
+    home.owner = 0;
+    w.nebulae = neb ? [{ x: 1000, y: 1000, radius: 300 }] : [];
+    w.belts = belt ? [{ x: 1000, y: 1000, radius: 300 }] : [];
+    s.count = 1;
+    const i = 0;
+    s.home[i] = home.id;
+    s.owner[i] = 0;
+    s.state[i] = STATE.TRANSIT;
+    s.target[i] = target.id;
+    s.dest[i] = target.id;
+    s.x[i] = home.x;
+    s.y[i] = home.y;
+    s.energy[i] = 50;
+    s.strength[i] = 50;
+    let ticks = 0;
+    while (s.state[i] === STATE.TRANSIT && ticks < 12000) {
+      updateSeedlings(w, DT);
+      ticks++;
+    }
+    return ticks;
+  }
+  const both = ticksFor(true, true);
+  const nebOnly = ticksFor(true, false);
+  const beltOnly = ticksFor(false, true);
+  assert.ok(both > nebOnly, "belt+nebula slower than nebula alone");
+  assert.ok(both > beltOnly, "belt+nebula slower than belt alone");
 });
 
 // --- 5. Invariants under specials -----------------------------------------------------------
