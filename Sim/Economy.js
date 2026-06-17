@@ -12,7 +12,7 @@ export function updateEconomy(world, dt) {
   const asts = world.asteroids;
   for (let a = 0; a < asts.length; a++) {
     const rock = asts[a];
-    if (rock.owner === OWNER_NEUTRAL) continue;
+    if (rock.dead || rock.owner === OWNER_NEUTRAL) continue;
     // Planets regenerate (and store) energy faster via energyMult. The owner's regen-tech
     // multiplier (1.0 = no tech) additionally scales the REGEN RATE only — not the cap.
     const mult = rock.energyMult || 1;

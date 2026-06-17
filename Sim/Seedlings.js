@@ -76,8 +76,8 @@ export function updateSeedlings(world, dt) {
       s.y[i] = a.y + Math.sin(s.orbitAngle[i]) * s.orbitRadius[i];
     } else if (st === STATE.TRANSIT) {
       const t = world.asteroids[s.target[i]];
-      if (!t) {
-        // Waypoint vanished — park back into orbit around home.
+      if (!t || t.dead) {
+        // Waypoint vanished (or its body was destroyed) — park back into orbit around home.
         s.state[i] = STATE.ORBIT;
         s.target[i] = -1;
         s.dest[i] = -1;
@@ -213,7 +213,7 @@ function breakOff(world, i, t) {
 // by player sends and tree-production rally routing. No-op if already home or unreachable.
 export function launchSeedling(world, i, dest) {
   const s = world.seed;
-  if (!dest || dest.id === s.home[i]) return;
+  if (!dest || dest.dead || dest.id === s.home[i]) return; // dead target → no-op
   const hop = nextHop(world, s.home[i], dest.id);
   const node = world.asteroids[hop];
   if (!node) return;
@@ -270,7 +270,7 @@ export function sendSeedlings(world, fromId, toId, fraction, owner) {
   if (fromId === toId) return 0;
   const s = world.seed;
   const target = world.asteroids[toId];
-  if (!target) return 0;
+  if (!target || target.dead) return 0; // can't send to a destroyed body
   const f = Math.max(0, Math.min(1, fraction));
   if (f === 0) return 0;
 

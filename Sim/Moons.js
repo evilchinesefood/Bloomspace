@@ -9,7 +9,7 @@ export function updateOrbits(world, dt) {
   const asts = world.asteroids;
   for (let i = 0; i < asts.length; i++) {
     const b = asts[i];
-    if (!b.orbiting) continue;
+    if (b.dead || !b.orbiting) continue; // a destroyed body freezes in place
     const c = b.orbitParent >= 0 ? asts[b.orbitParent] : b;
     const cx = b.orbitParent >= 0 ? c.x : b.orbitCx;
     const cy = b.orbitParent >= 0 ? c.y : b.orbitCy;

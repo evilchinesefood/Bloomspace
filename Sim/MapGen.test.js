@@ -1,7 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createWorld, OWNER_NEUTRAL, STATE } from "./World.js";
+import Sim from "./World.js";
 import { STAT_MIN } from "./MapGen.js";
+import { fireBombard, CHARGE_TICKS } from "./Bombard.js";
+import { plantTree, BATTERY_SIZE } from "./Trees.js";
 
 const TWO = [
   { id: 0, isAi: false, difficulty: 0 },
@@ -30,6 +33,40 @@ test("asteroid id === array index (load-bearing SoA invariant)", () => {
         `id===index broken for seed=${seed} count=${count}`,
       );
     }
+  }
+});
+
+test("id===index STILL holds after a bombard destroys a body (dead, never spliced)", () => {
+  // The dead-body operation marks a body dead in place — it must NEVER splice/reorder
+  // world.asteroids, or every seedling home/target/dest index (and asteroids[i].id===i)
+  // would silently corrupt. Drive a real bombard through the public fire path and re-assert.
+  const w = mk(13, 16);
+  const rock = w.asteroids.find((a) => a.owner === 0);
+  const target = w.asteroids.find(
+    (a) => a.owner === OWNER_NEUTRAL && a.kind === "asteroid" && !a.moon,
+  );
+  const len0 = w.asteroids.length;
+  // arm a full battery on the home rock
+  for (let k = 0; k < BATTERY_SIZE; k++) {
+    rock.energy = 2000;
+    w.players[0].seeds = 2000;
+    assert.equal(plantTree(w, rock.id, "bombard", 0), true);
+  }
+  for (const t of rock.trees) t.growth = 1;
+  assert.equal(fireBombard(w, rock.id, target.id, 0), true);
+  for (let t = 0; t < CHARGE_TICKS + 2; t++) Sim.step(w, 1 / 30);
+  assert.equal(target.dead, true, "target should be destroyed");
+  assert.equal(w.asteroids.length, len0, "array length unchanged (no splice)");
+  assert.ok(
+    w.asteroids.every((a, i) => a.id === i),
+    "id===index broke after bombard destroy",
+  );
+  // every surviving seedling still points at a valid in-range body
+  const s = w.seed;
+  for (let i = 0; i < s.count; i++) {
+    assert.ok(s.home[i] >= 0 && s.home[i] < len0, "home index still valid");
+    assert.ok(s.target[i] < len0, "target index still in range");
+    assert.ok(s.dest[i] < len0, "dest index still in range");
   }
 });
 

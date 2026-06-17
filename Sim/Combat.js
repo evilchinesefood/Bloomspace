@@ -198,7 +198,7 @@ function flipOwnership(world) {
   const asts = world.asteroids;
   for (let a = 0; a < asts.length; a++) {
     const rock = asts[a];
-    if (rock.owner === OWNER_NEUTRAL) continue; // neutral handled by colonization (T2)
+    if (rock.dead || rock.owner === OWNER_NEUTRAL) continue; // dead/neutral never flip
     const reach = rock.radius + HOLD_GAP;
     const reach2 = reach * reach;
     const cx0 = Math.floor((rock.x - reach) / CELL);

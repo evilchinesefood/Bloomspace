@@ -10,7 +10,13 @@ import {
   pushEvent,
 } from "./World.js";
 import { sendSeedlings } from "./Seedlings.js";
-import { plantTree } from "./Trees.js";
+import { plantTree, countBombard, BATTERY_SIZE } from "./Trees.js";
+import {
+  fireBombard,
+  isArmed,
+  BOMBARD_SEED_COST,
+  BOMBARD_ENERGY_COST,
+} from "./Bombard.js";
 import { buyTech, techCost, TECH_TRACKS, MAX_TIER } from "./Tech.js";
 
 // Difficulty knobs. 0 Easy · 1 Normal · 2 Hard · 3 Brutal. Higher = decides faster, commits
@@ -98,7 +104,7 @@ function nearestMatch(world, from, pred) {
   let bestD = Infinity;
   for (let i = 0; i < asts.length; i++) {
     const a = asts[i];
-    if (a.id === from.id || !pred(a)) continue;
+    if (a.id === from.id || a.dead || !pred(a)) continue; // dead bodies are untargetable
     const d = dist2(from, a);
     if (d < bestD || (d === bestD && world.rng() < 0.5)) {
       bestD = d;
@@ -147,6 +153,173 @@ function maybeBuyTech(world, player, k) {
   return buyTech(world, player.id, TECH_TRACKS[pick]);
 }
 
+// --- Bombard battery AI (rng-free, deterministic — mirrors maybeBuyTech's F3 principle) ------
+// Same develop gate as planting (Easy never builds). Picks a "safe rear" rock — the highest-
+// energy owned rock with NO adjacent enemy (falls back to the highest-energy owned rock if the
+// whole empire is frontline) — and slowly assembles a battery there, only spending when the
+// economy is comfortably strong so a battery never bankrupts normal expansion. Once armed, it
+// fires at the player's strongest rock (most orbiters, energy tiebreak; home rock as fallback).
+// Higher difficulty builds/fires more readily. All paced by serialize-ready _-prefixed counters;
+// NO world.rng is consumed (ties are broken by id), so existing determinism tests don't drift.
+//
+// Design choice (documented per the contract): "safe rear" = no neighbor owned by an enemy.
+// "strongest player rock" = max orbiter count, then max energy, then lowest id — all rng-free.
+
+// Tuning by difficulty index (0 Easy never builds). buildBuffer = spare seeds that must remain
+// after a bombard plant; planEvery / fireEvery = decisions between a plant / a fire attempt.
+const BOMB_KNOBS = [
+  null, // Easy: no bombard program
+  { buildEnergy: 150, buildBuffer: 60, planEvery: 4, fireEvery: 2 }, // Normal
+  { buildEnergy: 130, buildBuffer: 45, planEvery: 3, fireEvery: 1 }, // Hard
+  { buildEnergy: 110, buildBuffer: 30, planEvery: 2, fireEvery: 1 }, // Brutal
+];
+function bombKnobs(difficulty) {
+  return BOMB_KNOBS[Math.max(0, Math.min(3, difficulty | 0))];
+}
+
+// Count ORBITing seedlings of any owner home'd at a rock — the "strength" proxy for targeting.
+function orbitersAt(world, rockId) {
+  const s = world.seed;
+  let n = 0;
+  for (let i = 0; i < s.count; i++)
+    if (s.home[i] === rockId && s.state[i] === STATE.ORBIT) n++;
+  return n;
+}
+
+// True if any neighbor of `rock` is held by a live enemy of `id`.
+function hasEnemyNeighbor(world, rock, id) {
+  const asts = world.asteroids;
+  for (const nb of rock.neighbors || []) {
+    const a = asts[nb];
+    if (a && !a.dead && a.owner !== OWNER_NEUTRAL && a.owner !== id)
+      return true;
+  }
+  return false;
+}
+
+// Pick the AI's battery host. To AVOID scattering bombard trees across rocks (which never
+// completes a battery), COMMIT to a rock that already has a partial battery (0<count<5) — the
+// one furthest along, lowest id as tiebreak. Only when NO battery is in progress does it open a
+// new one on the best "safe rear" rock: highest-energy owned, habitable, non-frontline rock;
+// falling back to the highest-energy owned rock overall if the whole empire is frontline.
+function pickBatteryHost(world, owned, id) {
+  // Finish an in-progress battery first.
+  let partial = null;
+  for (const r of owned) {
+    if (r.dead || !r.habitable) continue;
+    const c = countBombard(r);
+    if (c <= 0 || c >= BATTERY_SIZE) continue;
+    if (
+      !partial ||
+      c > countBombard(partial) ||
+      (c === countBombard(partial) && r.id < partial.id)
+    )
+      partial = r;
+  }
+  if (partial) return partial;
+  // Otherwise open a new battery on a safe rear rock (or the strongest rock if none is safe).
+  let safe = null;
+  let any = null;
+  for (const r of owned) {
+    if (r.dead || !r.habitable) continue;
+    if (
+      !any ||
+      r.energy > any.energy ||
+      (r.energy === any.energy && r.id < any.id)
+    )
+      any = r;
+    if (hasEnemyNeighbor(world, r, id)) continue;
+    if (
+      !safe ||
+      r.energy > safe.energy ||
+      (r.energy === safe.energy && r.id < safe.id)
+    )
+      safe = r;
+  }
+  return safe || any;
+}
+
+// Pick the human (player 0) target rock to bombard: most orbiters, then most energy, then lowest
+// id (all rng-free). Falls back to any live habitable player-0 rock. Returns null if none.
+function pickBombTarget(world) {
+  const asts = world.asteroids;
+  let best = null;
+  let bestO = -1;
+  for (let i = 0; i < asts.length; i++) {
+    const a = asts[i];
+    if (a.dead || a.owner !== 0 || !a.habitable) continue;
+    const o = orbitersAt(world, a.id);
+    if (
+      o > bestO ||
+      (o === bestO && best && a.energy > best.energy) ||
+      (o === bestO && best && a.energy === best.energy && a.id < best.id)
+    ) {
+      bestO = o;
+      best = a;
+    } else if (!best) {
+      bestO = o;
+      best = a;
+    }
+  }
+  return best;
+}
+
+// maybeBombard — develop-only, rng-free battery program. Builds a battery on the committed `host`
+// rock (chosen in decide so normal planting can leave that rock alone to bank energy), then fires
+// it at the human's strongest rock. Paced by per-player decision counters. Returns the host rock
+// id while a battery is being BUILT there (so decide skips it for normal trees), else -1.
+function maybeBombard(world, player, host, k) {
+  const bk = bombKnobs(player.difficulty);
+  if (!bk) return -1; // Easy: no bombard
+  const id = player.id;
+
+  // 1. Fire any already-armed battery (difficulty-paced) at the human's strongest rock.
+  let armed = null;
+  const owned = world.asteroids;
+  for (let i = 0; i < owned.length; i++) {
+    const r = owned[i];
+    if (r.owner === id && !r.dead && !r.bombard && isArmed(r)) {
+      armed = r;
+      break;
+    }
+  }
+  if (armed) {
+    player._bombFireTick = (player._bombFireTick | 0) + 1;
+    if (player._bombFireTick % bk.fireEvery === 0) {
+      const target = pickBombTarget(world);
+      if (target && fireBombard(world, armed.id, target.id, id))
+        player._bombFires = (player._bombFires | 0) + 1;
+    }
+    return -1; // a finished/armed battery isn't "building" — don't reserve the rock
+  }
+
+  // 2. Otherwise grow a battery on the committed host — only when the economy is strong enough
+  //    that the spend won't starve expansion. Paced so it doesn't plant every single decision.
+  if (!host) return -1;
+  const count = countBombard(host);
+  if (count >= BATTERY_SIZE) return host.id; // full battery maturing — keep reserving the rock
+  const nextEnergy = BOMBARD_ENERGY_COST[count];
+  const nextSeeds = BOMBARD_SEED_COST[count];
+  // Can the player afford the next tree's SEEDS plus its develop buffer? If not, the AI is NOT in
+  // "battery mode" — return -1 so decide doesn't reserve the rock (this keeps default games, where
+  // surplus seeds never build up, bit-identical: the bombard path makes no observable change).
+  // Once a battery is already in progress (count>0) we keep reserving so it can complete.
+  const canAfford = (player.seeds ?? 0) >= nextSeeds + bk.buildBuffer;
+  if (count === 0 && !canAfford) return -1;
+  if (!canAfford) return host.id; // mid-battery but seed-starved — hold the rock, wait for seeds
+  // Energy gate: opening a NEW battery (count 0) demands the higher buildEnergy reserve so a
+  // battery only starts on a genuinely strong rock; FINISHING one (count>0) just needs to afford
+  // the next tree plus a small cushion, so an in-progress battery completes instead of stalling.
+  const energyGate =
+    count === 0 ? Math.max(bk.buildEnergy, nextEnergy) : nextEnergy + 20;
+  if (host.energy < energyGate) return host.id; // bank energy (rock reserved, no normal trees)
+  player._bombPlanTick = (player._bombPlanTick | 0) + 1;
+  if (player._bombPlanTick % bk.planEvery !== 0) return host.id;
+  if (plantTree(world, host.id, "bombard", id))
+    player._bombPlants = (player._bombPlants | 0) + 1;
+  return host.id;
+}
+
 // One decision for a single AI player: scan owned rocks, expand/attack/grow.
 function decide(world, player) {
   const k = knobs(player.difficulty);
@@ -155,14 +328,26 @@ function decide(world, player) {
 
   const owned = [];
   for (let i = 0; i < asts.length; i++)
-    if (asts[i].owner === id) owned.push(asts[i]);
+    if (asts[i].owner === id && !asts[i].dead) owned.push(asts[i]);
   if (owned.length === 0) return 0; // wiped — nothing to command
 
-  // Plant on a strong owned rock first (growth → more seedlings over time).
+  // Bombard battery program — same develop gate (Easy never builds). Run FIRST so it can reserve
+  // its committed host rock; normal tree-planting then skips that rock, letting it bank the energy
+  // a battery needs. Rng-free + buffered so it never starves expansion. Returns the reserved host
+  // id (or -1). Only AIs that can plant + have >1 owned rock pursue a battery (keep a base intact).
+  let reserved = -1;
+  if (k.plant && owned.length >= 2) {
+    const bombHost = pickBatteryHost(world, owned, id);
+    reserved = maybeBombard(world, player, bombHost, k);
+  }
+
+  // Plant on a strong owned rock first (growth → more seedlings over time). Skip the reserved
+  // bombard host so it isn't drained by seedling-tree production before the battery completes.
   if (k.plant && (player.seeds ?? 0) >= 5) {
     let host = null;
     for (let i = 0; i < owned.length; i++) {
       const r = owned[i];
+      if (r.id === reserved) continue;
       if (r.energy >= 30 && (!host || r.energy > host.energy)) host = r;
     }
     if (host) {

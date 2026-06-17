@@ -7,6 +7,7 @@ import { resolveCombat } from "./Combat.js";
 import { updateEconomy } from "./Economy.js";
 import { updateTrees } from "./Trees.js";
 import { updateAi, checkVictory } from "./Ai.js";
+import { updateBombard } from "./Bombard.js";
 import { initPlayerTech } from "./Tech.js";
 
 export const STARTING_SEEDS = 10;
@@ -230,6 +231,7 @@ export function step(world, dt) {
   resolveCombat(world, dt);
   updateEconomy(world, dt);
   updateTrees(world, dt);
+  updateBombard(world, dt); // advance battery charges / destroy bodies, before victory check
   checkVictory(world);
   world.tick++;
 }
@@ -238,9 +240,10 @@ export function step(world, dt) {
 // killSeedling swap-removes from the dense arrays.
 const BLACKHOLE_KILL_PAD = 54;
 function destroyInBlackHoles(world) {
-  // Black holes never change after map gen — compute the list once and reuse it.
+  // Black holes only change when one is destroyed (which nulls this memo) — compute the live
+  // list once and reuse it. A destroyed hole is excluded so it stops reaping ships.
   const holes = (world._blackholes ??= world.asteroids.filter(
-    (a) => a.kind === "blackhole",
+    (a) => a.kind === "blackhole" && !a.dead,
   ));
   if (holes.length === 0) return;
   const s = world.seed;

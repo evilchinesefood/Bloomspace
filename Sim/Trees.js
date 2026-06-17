@@ -9,9 +9,19 @@
 import { spawnSeedling, OWNER_NEUTRAL, KIND } from "./World.js";
 import { spendEnergy } from "./Economy.js";
 import { launchSeedling } from "./Seedlings.js";
+import {
+  BATTERY_SIZE,
+  BOMBARD_SEED_COST,
+  BOMBARD_ENERGY_COST,
+  countBombard,
+  matureBombardCount,
+} from "./Bombard.js";
 
-export const TREE_SEED_COST = 5; // player seeds to plant any tree
-export const TREE_ENERGY_COST = 30; // asteroid energy to plant any tree
+// Re-export the bombard counters so callers (AI/UI/tests) can read battery state via Trees.
+export { countBombard, matureBombardCount, BATTERY_SIZE };
+
+export const TREE_SEED_COST = 5; // player seeds to plant any (non-bombard) tree
+export const TREE_ENERGY_COST = 30; // asteroid energy to plant any (non-bombard) tree
 export const GROW_TIME = 8; // seconds for growth 0 → 1 (maturity)
 
 export const PRODUCE_INTERVAL = 4; // seedling tree: seconds between orbiter spawns
@@ -45,10 +55,30 @@ function homedCount(world, rockId, owner) {
 // appends a fresh tree on success. Returns true; otherwise no mutation and returns false.
 export function plantTree(world, asteroidId, type, owner) {
   const rock = world.asteroids[asteroidId];
-  if (!rock || rock.owner === OWNER_NEUTRAL || rock.owner !== owner)
+  if (
+    !rock ||
+    rock.dead ||
+    rock.owner === OWNER_NEUTRAL ||
+    rock.owner !== owner
+  )
     return false;
   const player = playerById(world, owner);
-  if (!player || (player.seeds ?? 0) < TREE_SEED_COST) return false;
+  if (!player) return false;
+  // Bombard trees: escalating cost by current battery count, capped at BATTERY_SIZE. They only
+  // grow to maturity (no produce/flower) — see updateTrees. Cost is NOT the flat seedling cost.
+  if (type === "bombard") {
+    const count = countBombard(rock);
+    if (count >= BATTERY_SIZE) return false; // battery full
+    const seedCost = BOMBARD_SEED_COST[count];
+    const energyCost = BOMBARD_ENERGY_COST[count];
+    if ((player.seeds ?? 0) < seedCost || rock.energy < energyCost)
+      return false;
+    player.seeds -= seedCost;
+    spendEnergy(rock, energyCost);
+    rock.trees.push({ type: "bombard", level: 1, growth: 0 });
+    return true;
+  }
+  if ((player.seeds ?? 0) < TREE_SEED_COST) return false;
   if (rock.energy < TREE_ENERGY_COST) return false;
   player.seeds -= TREE_SEED_COST;
   spendEnergy(rock, TREE_ENERGY_COST);
@@ -79,7 +109,7 @@ export function updateTrees(world, dt) {
   const asts = world.asteroids;
   for (let a = 0; a < asts.length; a++) {
     const rock = asts[a];
-    if (rock.owner === OWNER_NEUTRAL) continue;
+    if (rock.dead || rock.owner === OWNER_NEUTRAL) continue;
     const trees = rock.trees;
     for (let t = 0; t < trees.length; t++) {
       const tree = trees[t];
@@ -87,6 +117,9 @@ export function updateTrees(world, dt) {
         tree.growth = Math.min(1, tree.growth + dt / GROW_TIME);
         if (tree.growth < 1) continue; // only mature trees produce
       }
+      // Bombard trees are inert once mature: they only arm the battery — never produce
+      // orbiters or flower seeds. (isArmed reads matureBombardCount; firing is in Bombard.js.)
+      if (tree.type === "bombard") continue;
       if (tree.type === "defense") {
         tree.cooldown -= dt;
         if (tree.cooldown <= 0) {
