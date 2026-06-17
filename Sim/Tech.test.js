@@ -239,7 +239,6 @@ test("combat: a strength-teched owner's ships deal more damage to the right enem
 test("regen: a regen-teched owner's rock gains energy faster than an un-teched twin", () => {
   const w = world(4, [{ id: 0, isAi: false, difficulty: 0 }]);
   const base = w.asteroids.find((a) => a.owner === 0);
-  base.owner = 0;
   base.energyStat = 100;
   base.energyMult = 1;
   base.energy = 0;
@@ -258,7 +257,6 @@ test("regen: a regen-teched owner's rock gains energy faster than an un-teched t
     trees: [],
   };
   w.asteroids.push(twin);
-  ownerRegenMult; // ensure imported
   // give owner 0 regen tech
   w.players[0].seeds = 1000;
   buyTech(w, 0, TECH.REGEN);
