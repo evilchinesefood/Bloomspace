@@ -240,6 +240,22 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     el("wa-option", { value: "3", textContent: "Brutal" }),
   ]);
 
+  const winSel = el("wa-select", {}, [
+    el("wa-option", { value: "elimination", textContent: "Elimination" }),
+    el("wa-option", {
+      value: "domination",
+      textContent: "Domination (hold most for a while)",
+    }),
+  ]);
+
+  // Time-limit options map to seconds (0 = no cap).
+  const timeSel = el("wa-select", {}, [
+    el("wa-option", { value: "0", textContent: "No limit" }),
+    el("wa-option", { value: "300", textContent: "5 minutes" }),
+    el("wa-option", { value: "600", textContent: "10 minutes" }),
+    el("wa-option", { value: "900", textContent: "15 minutes" }),
+  ]);
+
   // Map size preset also nudges the default asteroid count.
   sizeSel.addEventListener("change", () => {
     const p = SIZES[sizeSel.value] || SIZES.medium;
@@ -251,6 +267,8 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     field("Asteroid count", countSlider),
     field("AI opponents", aiSel),
     field("Difficulty", diffSel),
+    field("Win condition", winSel),
+    field("Time limit", timeSel),
   );
 
   const cancelBtn = el("wa-button", {
@@ -280,6 +298,8 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     const difficulty = parseInt(diffSel.value, 10) || 0;
     const asteroidCount =
       Math.round(Number(countSlider.value)) || size.asteroids;
+    const mode = winSel.value === "domination" ? "domination" : "elimination";
+    const timeLimitSecs = parseInt(timeSel.value, 10) || 0;
     // Players: human id 0 + N AI of the chosen difficulty.
     const players = [{ id: 0, isAi: false, difficulty: 0 }];
     for (let i = 1; i <= aiCount; i++)
@@ -295,6 +315,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
       planetMax: size.planetMax,
       players,
       seed,
+      winConfig: { mode, timeLimitSecs },
     });
   });
 
@@ -306,6 +327,8 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     sizeSel.value = "medium";
     aiSel.value = "1";
     diffSel.value = "1";
+    winSel.value = "elimination";
+    timeSel.value = "0";
   };
   if (window.customElements && customElements.whenDefined) {
     customElements.whenDefined("wa-select").then(prefill);
@@ -314,9 +337,29 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
   return cleanup;
 }
 
-// Win/Lose overlay. status is 'won' | 'lost'. onNewGame() returns to the menu.
+// Win/Lose/Draw overlay. status is 'won' | 'lost' | 'draw'. onNewGame() returns to the menu.
+const GAME_OVER_VARIANTS = {
+  won: {
+    icon: "fa-trophy",
+    color: "#5dff9b",
+    title: "Victory",
+    sub: "You hold every asteroid in the field.",
+  },
+  lost: {
+    icon: "fa-skull",
+    color: "#ff5a7a",
+    title: "Defeat",
+    sub: "Your bloom has been wiped out.",
+  },
+  draw: {
+    icon: "fa-scale-balanced",
+    color: "#9fb0d0",
+    title: "Stalemate",
+    sub: "Time ran out with neither bloom in the lead.",
+  },
+};
 export function showGameOver(root, status, { onNewGame }) {
-  const won = status === "won";
+  const v = GAME_OVER_VARIANTS[status] || GAME_OVER_VARIANTS.lost;
   const wrap = overlay();
   const card = el("wa-card", {
     style:
@@ -324,18 +367,16 @@ export function showGameOver(root, status, { onNewGame }) {
   });
   card.append(
     el("i", {
-      class: `fa-solid ${won ? "fa-trophy" : "fa-skull"}`,
-      style: `font-size:3.2rem;color:${won ? "#5dff9b" : "#ff5a7a"};`,
+      class: `fa-solid ${v.icon}`,
+      style: `font-size:3.2rem;color:${v.color};`,
     }),
     el("h1", {
       style: "margin:.5rem 0 .25rem;font:700 2rem system-ui;",
-      textContent: won ? "Victory" : "Defeat",
+      textContent: v.title,
     }),
     el("p", {
       style: "margin:0 0 1.5rem;opacity:.75;font:400 .95rem system-ui;",
-      textContent: won
-        ? "You hold every asteroid in the field."
-        : "Your bloom has been wiped out.",
+      textContent: v.sub,
     }),
   );
   const btn = el("wa-button", {

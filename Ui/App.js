@@ -195,7 +195,12 @@ export function createApp(root) {
     if (state === APP_STATE.PLAYING && game) {
       if (hud) hud.update();
       const st = game.world.status;
-      if (st === WORLD_STATUS.WON || st === WORLD_STATUS.LOST) toGameOver(st);
+      if (
+        st === WORLD_STATUS.WON ||
+        st === WORLD_STATUS.LOST ||
+        st === WORLD_STATUS.DRAW
+      )
+        toGameOver(st);
     }
   }
 

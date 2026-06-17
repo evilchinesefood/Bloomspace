@@ -229,12 +229,16 @@ export function updateAi(world, dt) {
   }
 }
 
-// checkVictory — set terminal world.status. Once 'won'/'lost' it stays put. Victory is about
-// ELIMINATING THE ENEMY, not occupying every body: neutral rocks (and the non-habitable star)
-// don't need to be taken.
-//   'lost' : player 0 has ZERO asteroids AND ZERO living seedlings.
-//   'won'  : no AI (owner >= 1) holds any asteroid AND has no living seedlings.
-//   else   : 'playing'.
+// checkVictory — set terminal world.status. Once terminal (won/lost/draw) it stays put. Three
+// win paths, checked in order each call; the first to fire latches:
+//   1. ELIMINATION (always active) — about wiping the enemy, not occupying every body:
+//        'lost' : player 0 has ZERO asteroids AND ZERO living seedlings.
+//        'won'  : no AI (owner >= 1) holds any asteroid AND has no living seedlings.
+//   2. DOMINATION (winConfig.mode === "domination") — hold >= dominationPct of habitable bodies
+//        for dominationSecs CONTINUOUS seconds (counted in ticks). Player 0 → won; an AI → lost.
+//   3. TIME-CAP (winConfig.timeLimitSecs > 0) — at tick >= timeLimitSecs*30, resolve by habitable
+//        territory: player 0 strictly leads → won; an AI strictly leads → lost; top tied → draw.
+// Habitable counts are written defensively as (habitable && !dead) so a later `dead` flag works.
 function hasPresence(world, pred) {
   const asts = world.asteroids;
   for (let i = 0; i < asts.length; i++) if (pred(asts[i].owner)) return true;
@@ -243,10 +247,92 @@ function hasPresence(world, pred) {
   return false;
 }
 
+// Habitable bodies currently held by `owner` (forward-compatible with a future `dead` flag).
+function heldHabitable(world, owner) {
+  const asts = world.asteroids;
+  let n = 0;
+  for (let i = 0; i < asts.length; i++) {
+    const a = asts[i];
+    if (a.habitable && !a.dead && a.owner === owner) n++;
+  }
+  return n;
+}
+
+// Total live habitable bodies on the map (the domination/time-cap denominator).
+function totalHabitable(world) {
+  const asts = world.asteroids;
+  let n = 0;
+  for (let i = 0; i < asts.length; i++)
+    if (asts[i].habitable && !asts[i].dead) n++;
+  return n;
+}
+
+// Domination: per call, accumulate each player's continuous-hold tick counter and resolve.
+// Returns true if it latched a terminal status (so checkVictory stops).
+function checkDomination(world, wc) {
+  const need = wc.dominationSecs * 30; // fixed timestep 1/30s → seconds*30 ticks
+  const total = totalHabitable(world);
+  for (const p of world.players) {
+    const held = heldHabitable(world, p.id);
+    if (total > 0 && held / total >= wc.dominationPct)
+      p._domTicks = (p._domTicks | 0) + 1;
+    else p._domTicks = 0; // dropping below the threshold resets the streak
+    if ((p._domTicks | 0) >= need) {
+      // Player 0 dominating → win; any AI dominating → loss. Emit the matching event.
+      if (p.id === 0) {
+        world.status = WORLD_STATUS.WON;
+        pushEvent(world, EVENT.WIN);
+      } else {
+        world.status = WORLD_STATUS.LOST;
+        pushEvent(world, EVENT.LOSE);
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+// Time-cap: resolve the match by habitable territory once the tick cap is reached. Tiebreak is
+// purely "most habitable bodies held"; if the single highest count is shared by 2+ players it's a
+// DRAW (a draw emits NO event). A clear win for player 0 or an AI emits WIN/LOSE.
+function resolveTimeCap(world) {
+  let p0 = 0;
+  let bestAi = -1; // highest habitable count among AI players (-1 = no AI present)
+  let bestAiTied = false; // some AI ties the current bestAi
+  for (const p of world.players) {
+    const held = heldHabitable(world, p.id);
+    if (p.id === 0) {
+      p0 = held;
+    } else if (held > bestAi) {
+      bestAi = held;
+      bestAiTied = false;
+    } else if (held === bestAi) {
+      bestAiTied = true;
+    }
+  }
+  if (p0 > bestAi) {
+    world.status = WORLD_STATUS.WON;
+    pushEvent(world, EVENT.WIN);
+  } else if (bestAi > p0 && !bestAiTied) {
+    // A single AI strictly leads everyone → human loss.
+    world.status = WORLD_STATUS.LOST;
+    pushEvent(world, EVENT.LOSE);
+  } else {
+    // Tie for the lead (p0 == bestAi, or multiple AIs share the top) → stalemate, no event.
+    world.status = WORLD_STATUS.DRAW;
+  }
+}
+
 export function checkVictory(world) {
-  if (world.status === WORLD_STATUS.WON || world.status === WORLD_STATUS.LOST)
+  const st = world.status;
+  if (
+    st === WORLD_STATUS.WON ||
+    st === WORLD_STATUS.LOST ||
+    st === WORLD_STATUS.DRAW
+  )
     return;
-  // Status latches, so this transition fires exactly once — emit the matching event here.
+  // 1. Elimination (always active). Status latches, so this transition fires exactly once —
+  // emit the matching event here.
   if (!hasPresence(world, (o) => o === 0)) {
     world.status = WORLD_STATUS.LOST;
     pushEvent(world, EVENT.LOSE);
@@ -255,7 +341,15 @@ export function checkVictory(world) {
   if (!hasPresence(world, (o) => o >= 1)) {
     world.status = WORLD_STATUS.WON;
     pushEvent(world, EVENT.WIN);
+    return;
   }
+  const wc = world.winConfig;
+  if (!wc) return; // pre-winConfig worlds: elimination only (defensive)
+  // 2. Domination (opt-in).
+  if (wc.mode === "domination" && checkDomination(world, wc)) return;
+  // 3. Time-cap (opt-in). Resolve by territory once the cap tick is reached.
+  if (wc.timeLimitSecs > 0 && world.tick >= wc.timeLimitSecs * 30)
+    resolveTimeCap(world);
 }
 
 export default { updateAi, checkVictory };

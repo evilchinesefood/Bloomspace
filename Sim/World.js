@@ -18,8 +18,14 @@ export const OWNER_NEUTRAL = -1;
 export const STATE = { ORBIT: 0, TRANSIT: 1, COMBAT: 2, DEAD: 3, SLING: 4 };
 // Seedling kinds (the SoA `kind` field). Named so the 0/1 literals don't sprawl across layers.
 export const KIND = { FIGHTER: 0, DEFENDER: 1 };
-// Terminal/active match status (world.status). Single source for the string union.
-export const WORLD_STATUS = { PLAYING: "playing", WON: "won", LOST: "lost" };
+// Terminal/active match status (world.status). Single source for the string union. DRAW is the
+// stalemate outcome a time-cap can reach (neither side leads in territory) — it has NO event.
+export const WORLD_STATUS = {
+  PLAYING: "playing",
+  WON: "won",
+  LOST: "lost",
+  DRAW: "draw",
+};
 // Max distinct players (owner ids 0..MAX_PLAYERS-1): 1 human + up to 6 AI, bounded by the
 // Palette AI color count. Combat's same-body buffers and the AI palette derive from this.
 export const MAX_PLAYERS = 7;
@@ -122,6 +128,16 @@ export function createWorld(config = {}) {
       n: 0,
       capacity,
     },
+  };
+  // Win/loss rules. Defaults reproduce CURRENT behavior EXACTLY (pure elimination, no time
+  // limit), so omitting config.winConfig drifts zero bits. domination/time-cap are opt-in.
+  // Plain JSON (numbers + one string) so a later save/resume feature can serialize it.
+  const wc = config.winConfig ?? {};
+  world.winConfig = {
+    mode: wc.mode ?? "elimination", // "elimination" | "domination"
+    dominationPct: wc.dominationPct ?? 0.6, // fraction of habitable bodies to hold
+    dominationSecs: wc.dominationSecs ?? 25, // continuous seconds at/above pct to win
+    timeLimitSecs: wc.timeLimitSecs ?? 0, // 0 = no time cap
   };
   // Normalize every player to have a harvestable seeds resource + a zeroed tech record.
   for (const p of world.players) {
