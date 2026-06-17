@@ -11,6 +11,7 @@ import { createTreeView } from "./Render/TreeView.js";
 import { createFx } from "./Render/Fx.js";
 import { createPicking } from "./Render/Picking.js";
 import { createInput } from "./Ui/Input.js";
+import { createSound } from "./Ui/Sound.js";
 
 // Free every GPU resource a match's scene graph holds. renderer.dispose()/forceContextLoss
 // reclaim the GL context, but the geometries, materials, instance buffers and (notably)
@@ -65,6 +66,9 @@ export function createGame(canvas, config = {}) {
   const trees = createTreeView(scene.scene, world);
   const fx = createFx(scene.scene, world);
   const picking = createPicking(scene.scene, scene.camera, canvas, world);
+  // Non-authoritative audio: starts suspended, unlocks on first user gesture, consumes the
+  // same event channel the FX drain reads. Owns no game truth.
+  const sound = createSound(config.audio || {});
   const views = { asteroids, seedlings, trees, fx };
 
   // Send-fraction lives here so Input (drag release) and the HUD slider share one source.
@@ -101,20 +105,30 @@ export function createGame(canvas, config = {}) {
     const dt = Math.min(0.05, (now - lastRenderMs) / 1000);
     lastRenderMs = now;
 
-    // Drain the sim's exact per-tick event channel (recorded during step()). DEATH events
-    // become death puffs, capped so big die-offs don't spam the pool — we cap the puffs SPAWNED,
-    // not the events scanned (other types are skipped, audio consumes them next feature).
-    // Accumulates across the steps run this frame; cleared here so a paused frame (no steps)
-    // re-spawns nothing.
+    // Drain the sim's exact per-tick event channel (recorded during step()) ONCE, feeding BOTH
+    // FX and audio in the same pass (n is reset after, so a second reader would see 0). DEATH
+    // events become death puffs, capped so big die-offs don't spam the pool — we cap the puffs
+    // SPAWNED, not the events scanned. Sound maps each event type to a one-shot SFX (its own
+    // per-frame throttle prevents machine-gunning). Accumulates across the steps run this frame;
+    // cleared here so a paused frame (no steps) re-spawns nothing.
     const ev = world.events;
     let puffs = 0;
     for (let k = 0; k < ev.n; k++) {
-      if (ev.type[k] === EVENT.DEATH && puffs < DEATH_PUFF_MAX) {
-        fx.spawnDeath(ev.x[k], ev.y[k]);
-        puffs++;
-      }
+      const type = ev.type[k];
+      if (type === EVENT.DEATH) {
+        if (puffs < DEATH_PUFF_MAX) {
+          fx.spawnDeath(ev.x[k], ev.y[k]);
+          puffs++;
+        }
+        sound.play("death");
+      } else if (type === EVENT.SEND) sound.play("send");
+      else if (type === EVENT.CAPTURE) sound.play("capture");
+      else if (type === EVENT.WIN) sound.play("win");
+      else if (type === EVENT.LOSE) sound.play("lose");
+      else if (type === EVENT.FIRE) sound.play("fire"); // reserved; no emitter yet
     }
     ev.n = 0;
+    sound.endFrame(); // reset per-frame SFX throttle counters
 
     flowerTimer += dt;
     if (flowerTimer >= FLOWER_EVERY) {
@@ -134,6 +148,7 @@ export function createGame(canvas, config = {}) {
   }
 
   function destroy() {
+    sound.destroy();
     input.destroy();
     // Drop the resize listener the scene registered so matches don't stack handlers.
     if (scene.resize) window.removeEventListener("resize", scene.resize);
@@ -158,7 +173,7 @@ export function createGame(canvas, config = {}) {
   // match setup (right after the player hits Start), so the game loop stays smooth.
   render(0);
 
-  return {
+  const api = {
     world,
     step: (dt) => Sim.step(world, dt),
     render,
@@ -176,6 +191,32 @@ export function createGame(canvas, config = {}) {
     // Quality controls for the HUD settings panel.
     setBloomEnabled: (on) => scene.setBloomEnabled(on),
     setSeedlingCap: (n) => seedlings.setCap(n),
+    // Audio controls (consumed via the App quality object).
+    setSfxEnabled: (on) => sound.setSfxEnabled(on),
+    setMusicEnabled: (on) => sound.setMusicEnabled(on),
+    sound, // exposed for browser verification (debug()/gain inspection)
+    // Plant wrapper: routes the HUD's plant action through Input, then fires a plant SFX only
+    // when a tree was actually planted (Input returns false on a failed/blocked plant).
+    plant: (type) => {
+      const ok = input.plant(type);
+      if (ok) sound.play("plant");
+      return ok;
+    },
+    // Read-only flags surfaced for the headless verify harness (reduced-motion + bloom state).
+    sceneReducedMotion: scene.reducedMotion,
+    get bloomEnabled() {
+      return scene.bloom.enabled;
+    },
     destroy,
   };
+
+  // Verification seam: expose the live match on window ONLY when the URL carries ?debug. No-op
+  // in normal play — lets the headless browser-verify harness read audio gains + motion flags.
+  if (
+    typeof location !== "undefined" &&
+    /\bdebug\b/.test(location.search || "")
+  )
+    window.__bloomGame = api;
+
+  return api;
 }

@@ -123,10 +123,12 @@ export function createHud(root, api) {
     settings.open = false;
     refreshSpeed();
   });
-  // --- Quality controls (T8): bloom on/off + render-only seedling cap. -------
+  // --- Quality controls: bloom on/off, audio toggles, render-only seedling cap. ----------
   const q = (api.getQuality && api.getQuality()) || {
     bloom: true,
     seedlingCap: 0,
+    sfx: true,
+    music: true,
   };
 
   // Bloom toggle — flips the UnrealBloomPass in/out of the composer (the escape hatch).
@@ -138,6 +140,26 @@ export function createHud(root, api) {
   const onBloom = () => api.setBloom && api.setBloom(bloomSwitch.checked);
   bloomSwitch.addEventListener("change", onBloom);
   bloomSwitch.addEventListener("wa-change", onBloom);
+
+  // SFX toggle — flips the audio engine's SFX gain (one-shot event sounds).
+  const sfxSwitch = el("wa-switch", {
+    style: "margin-bottom:.6rem;",
+    textContent: "Sound effects",
+  });
+  if (q.sfx !== false) sfxSwitch.setAttribute("checked", "");
+  const onSfx = () => api.setSfx && api.setSfx(sfxSwitch.checked);
+  sfxSwitch.addEventListener("change", onSfx);
+  sfxSwitch.addEventListener("wa-change", onSfx);
+
+  // Music toggle — starts/stops the looping ambient bed live.
+  const musicSwitch = el("wa-switch", {
+    style: "margin-bottom:.6rem;",
+    textContent: "Ambient music",
+  });
+  if (q.music !== false) musicSwitch.setAttribute("checked", "");
+  const onMusic = () => api.setMusic && api.setMusic(musicSwitch.checked);
+  musicSwitch.addEventListener("change", onMusic);
+  musicSwitch.addEventListener("wa-change", onMusic);
 
   // Seedling cap — RENDER-ONLY limit on drawn instances (not a sim change). 0 = uncapped.
   const capOptions = [
@@ -167,9 +189,11 @@ export function createHud(root, api) {
       }),
       resumeBtn,
       bloomSwitch,
+      sfxSwitch,
+      musicSwitch,
       capSelect,
       el("div", {
-        style: "opacity:.55;font-size:.72rem;line-height:1.3;",
+        style: "opacity:.8;font-size:.72rem;line-height:1.3;",
         textContent: "Cap limits drawn seedlings only — the sim is unchanged.",
       }),
     ]),
@@ -346,7 +370,7 @@ export function createHud(root, api) {
   inboundBtn.addEventListener("click", () => api.toggleInbound());
 
   const hint = el("div", {
-    style: "margin-top:.6rem;font:500 .76rem system-ui;opacity:.6;",
+    style: "margin-top:.6rem;font:500 .76rem system-ui;opacity:.72;",
     textContent: "Drag from this asteroid to a target to send seedlings.",
   });
 

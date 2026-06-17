@@ -25,6 +25,10 @@ const SIZES = {
   },
 };
 
+// Resolve an app-relative asset path against the page's <base> so it works under a deploy
+// subpath (e.g. /bloomspace/). Mirrors the Sw.js / Web Awesome base-path handling.
+const baseUrl = (rel) => new URL(rel, document.baseURI).href;
+
 const el = (tag, props = {}, kids = []) => {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
@@ -164,7 +168,7 @@ export function showStartMenu(root, { onNew }) {
   // service-worker cache). Keep in lockstep with Sw.js CACHE_VERSION.
   card.append(
     el("div", {
-      style: "margin-top:.8rem;font:600 .72rem system-ui;opacity:.4;",
+      style: "margin-top:.8rem;font:600 .72rem system-ui;opacity:.72;",
       textContent: "build v21",
     }),
   );
@@ -350,4 +354,4 @@ export function showGameOver(root, status, { onNewGame }) {
   return () => wrap.remove();
 }
 
-export { el };
+export { el, baseUrl };

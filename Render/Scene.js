@@ -25,6 +25,13 @@ const MIN_ZOOM = 0.82; // allow pulling back a little past fit-all to see the wh
 const MAX_ZOOM = 8; // sane close-in limit
 const ZOOM_STEP = 1.0015; // per wheel-delta unit
 
+// prefers-reduced-motion: when the OS/browser requests reduced motion we pause the ambient
+// starfield drift (the only purely-decorative continuous motion in the scene). Bloom's default
+// is handled in App.js (a saved user choice still wins); here we just gate the drift.
+const prefersReducedMotion = () =>
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 export function createScene(canvas, world) {
   const renderer = new THREE.WebGLRenderer({
     canvas,
@@ -75,8 +82,11 @@ export function createScene(canvas, world) {
   }
   addStars();
 
-  // Subtle starfield drift (downward), wrapping. Called each render frame with dt.
+  // Subtle starfield drift (downward), wrapping. Called each render frame with dt. Becomes a
+  // no-op under prefers-reduced-motion (the stars stay put — still rendered, just not moving).
+  const reducedMotion = prefersReducedMotion();
   function driftStars(dt) {
+    if (reducedMotion) return;
     for (const t of starTiers) {
       const p = t.geo.attributes.position.array;
       const sp = t.speeds;
@@ -377,6 +387,7 @@ export function createScene(canvas, world) {
     setBloomEnabled,
     disposeControls,
     driftStars,
+    reducedMotion, // true when prefers-reduced-motion: reduce (drift paused, FX damped)
     isContextLost: () => contextLost,
     // Live zoom factor (1 = fit-all, >1 = zoomed in).
     getZoom: () => zoom,

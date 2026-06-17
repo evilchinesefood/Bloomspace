@@ -34,13 +34,40 @@ export function createApp(root) {
   let paused = false;
   let closeOverlay = null; // teardown for the current full-screen overlay
   let gameOverShown = false;
-  // Session-persistent quality settings (survive New Game; reapplied to each match).
-  const quality = { bloom: true, seedlingCap: 0 }; // cap 0 = uncapped
+
+  // Persisted quality settings (survive New Game AND reloads). Reduced-motion sets the bloom
+  // DEFAULT (off when the user prefers reduced motion), but any saved choice still wins.
+  const QUALITY_KEY = "bloomspace.quality";
+  const reduceMotion =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const quality = {
+    bloom: !reduceMotion, // effective default; overridden by saved value below
+    seedlingCap: 0, // cap 0 = uncapped
+    sfx: true,
+    music: true,
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem(QUALITY_KEY) || "null");
+    if (saved && typeof saved === "object") Object.assign(quality, saved);
+  } catch {
+    /* corrupt/blocked storage — fall back to defaults */
+  }
+
+  function saveQuality() {
+    try {
+      localStorage.setItem(QUALITY_KEY, JSON.stringify(quality));
+    } catch {
+      /* storage blocked (private mode / quota) — non-fatal */
+    }
+  }
 
   function applyQuality() {
     if (!game) return;
     game.setBloomEnabled(quality.bloom);
     game.setSeedlingCap(quality.seedlingCap);
+    game.setSfxEnabled(quality.sfx);
+    game.setMusicEnabled(quality.music);
   }
 
   function clearOverlay() {
@@ -105,7 +132,7 @@ export function createApp(root) {
       },
       getSendFraction: () => (game ? game.getSendFraction() : 0.5),
       setSendFraction: (f) => game && game.setSendFraction(f),
-      onPlant: (type) => game && game.input.plant(type),
+      onPlant: (type) => game && game.plant(type),
       getSelected: () => (game ? game.input.selectedId() : -1),
       setRallyMode: (on) => game && game.input.setRallyMode(on),
       isRallyMode: () => (game ? game.input.isRallyMode() : false),
@@ -114,15 +141,27 @@ export function createApp(root) {
       toggleInbound: () =>
         game ? game.views.asteroids.toggleInbound() : false,
       isInbound: () => (game ? game.views.asteroids.isInbound() : false),
-      // Quality settings: read/write the session-persistent state + apply live.
+      // Quality settings: read/write the persisted state + apply live (saved on every change).
       getQuality: () => quality,
       setBloom: (on) => {
         quality.bloom = !!on;
         if (game) game.setBloomEnabled(quality.bloom);
+        saveQuality();
       },
       setSeedlingCap: (n) => {
         quality.seedlingCap = n;
         if (game) game.setSeedlingCap(n);
+        saveQuality();
+      },
+      setSfx: (on) => {
+        quality.sfx = !!on;
+        if (game) game.setSfxEnabled(quality.sfx);
+        saveQuality();
+      },
+      setMusic: (on) => {
+        quality.music = !!on;
+        if (game) game.setMusicEnabled(quality.music);
+        saveQuality();
       },
     });
     state = APP_STATE.PLAYING;

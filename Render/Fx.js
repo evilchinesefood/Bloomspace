@@ -6,8 +6,20 @@ import * as THREE from "three";
 const POOL = 1024; // max simultaneous particles
 const TAU = Math.PI * 2;
 
+// prefers-reduced-motion: damp the particle bursts (fewer particles, slower, shorter-lived)
+// so the decorative FX don't fling motion across the screen for motion-sensitive players.
+const prefersReducedMotion = () =>
+  typeof window !== "undefined" &&
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 // `world` is unused today; kept for create*(scene, world) symmetry with the other views.
 export function createFx(scene, world) {
+  const reduced = prefersReducedMotion();
+  // Scale factors applied to every burst when reduced-motion is on.
+  const COUNT_K = reduced ? 0.4 : 1; // fewer particles
+  const SPEED_K = reduced ? 0.5 : 1; // slower spread
+  const LIFE_K = reduced ? 0.6 : 1; // shorter-lived
   const pos = new Float32Array(POOL * 3);
   const colArr = new Float32Array(POOL * 3); // displayed color (faded)
   const baseCol = new Float32Array(POOL * 3); // full-brightness source color
@@ -57,28 +69,31 @@ export function createFx(scene, world) {
 
   // Outward ring burst when seedlings are dispatched.
   function spawnSend(x, y, hex = 0x46e8ff) {
-    const count = 18;
+    const count = Math.max(4, Math.round(18 * COUNT_K));
     for (let k = 0; k < count; k++) {
       const a = (k / count) * TAU;
-      emit(x, y, Math.cos(a), Math.sin(a), 90 + Math.random() * 60, 0.6, hex);
+      const sp = (90 + Math.random() * 60) * SPEED_K;
+      emit(x, y, Math.cos(a), Math.sin(a), sp, 0.6 * LIFE_K, hex);
     }
   }
 
   // Fast scatter on death.
   function spawnDeath(x, y, hex = 0xff5a5a) {
-    const count = 10;
+    const count = Math.max(4, Math.round(10 * COUNT_K));
     for (let k = 0; k < count; k++) {
       const a = Math.random() * TAU;
-      emit(x, y, Math.cos(a), Math.sin(a), 60 + Math.random() * 80, 0.5, hex);
+      const sp = (60 + Math.random() * 80) * SPEED_K;
+      emit(x, y, Math.cos(a), Math.sin(a), sp, 0.5 * LIFE_K, hex);
     }
   }
 
   // Gentle upward-ish bloom when a tree flowers.
   function spawnFlower(x, y, hex = 0xffe27a) {
-    const count = 14;
+    const count = Math.max(4, Math.round(14 * COUNT_K));
     for (let k = 0; k < count; k++) {
       const a = Math.random() * TAU;
-      emit(x, y, Math.cos(a), Math.sin(a), 20 + Math.random() * 40, 1.0, hex);
+      const sp = (20 + Math.random() * 40) * SPEED_K;
+      emit(x, y, Math.cos(a), Math.sin(a), sp, 1.0 * LIFE_K, hex);
     }
   }
 
