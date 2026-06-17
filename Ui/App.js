@@ -142,6 +142,8 @@ export function createApp(root) {
       isRallyMode: () => (game ? game.input.isRallyMode() : false),
       setConnectMode: (on) => game && game.input.setConnectMode(on),
       isConnectMode: () => (game ? game.input.isConnectMode() : false),
+      setFireMode: (on) => game && game.input.setFireMode(on),
+      isFireMode: () => (game ? game.input.isFireMode() : false),
       toggleInbound: () =>
         game ? game.views.asteroids.toggleInbound() : false,
       isInbound: () => (game ? game.views.asteroids.isInbound() : false),

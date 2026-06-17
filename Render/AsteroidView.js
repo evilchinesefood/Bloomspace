@@ -6,6 +6,7 @@
 import * as THREE from "three";
 import { ownerColor, ownerColorHex } from "./Palette.js";
 import { lodActive } from "./SeedlingView.js";
+import { CHARGE_TICKS } from "../Sim/Bombard.js";
 
 // Small seeded PRNG so each planet's look is unique but stable.
 function rngFrom(seed) {
@@ -256,12 +257,20 @@ export function sharedTextures() {
   return _glowTex ? [_glowTex] : [];
 }
 
-export function createAsteroidView(scene, world, camCtl) {
+export function createAsteroidView(scene, world, camCtl, fx) {
   const rocks = world.asteroids;
   const n = rocks.length;
   const dummy = new THREE.Object3D();
   const col = new THREE.Color();
   const lastOwner = new Int32Array(n).fill(-99);
+
+  // Per-body THREE.Mesh refs for non-instanced bodies (planets, star, blackhole) + their halos,
+  // keyed by id, so a destroyed body can be hidden (asteroids hide via their instanced matrix).
+  const bodyMesh = new Array(n).fill(null);
+  const bodyHalo = new Array(n).fill(null);
+  // Dead-transition tracking: detect the frame a body first becomes `dead` (one-shot work:
+  // hide body+rim, spawn explosion, drop network edges) — set ONCE, never re-fired.
+  const deadSeen = new Uint8Array(n);
 
   // Bodies that move each frame (moons, asteroid satellites, binary members) need their
   // instanced body/rim + the network edges rewritten every tick.
@@ -304,6 +313,7 @@ export function createAsteroidView(scene, world, camCtl) {
       pm.position.set(a.x, a.y, -2);
       pm.scale.set(a.radius, a.radius, 1);
       scene.add(pm);
+      bodyMesh[i] = pm;
     } else if (a.kind === "star" || a.kind === "blackhole") {
       const isHole = a.kind === "blackhole";
       const body = new THREE.Mesh(
@@ -317,6 +327,7 @@ export function createAsteroidView(scene, world, camCtl) {
       body.position.set(a.x, a.y, -2);
       body.scale.set(a.radius, a.radius, 1);
       scene.add(body);
+      bodyMesh[i] = body;
       // Soft additive halo so a star reads as a light source (smaller, dimmer for a hole).
       const halo = new THREE.Mesh(
         new THREE.CircleGeometry(1, 40),
@@ -333,6 +344,7 @@ export function createAsteroidView(scene, world, camCtl) {
       halo.position.set(a.x, a.y, -1.7);
       halo.scale.set(hs, hs, 1);
       scene.add(halo);
+      bodyHalo[i] = halo;
     }
   }
 
@@ -359,9 +371,19 @@ export function createAsteroidView(scene, world, camCtl) {
   scene.add(rims);
 
   // --- Neighbor network (faint; moon edges move so rebuild positions when there are moons) ---
-  const edgePairs = [];
-  for (let i = 0; i < n; i++)
-    for (const j of rocks[i].neighbors || []) if (j > i) edgePairs.push([i, j]);
+  // edgePairs is rebuilt from the CURRENT neighbor lists whenever a body dies (the Sim clears a
+  // dead body's neighbors), so its edges vanish. The buffer is allocated once at the initial
+  // (max) edge count; the draw range shrinks when edges are dropped.
+  let edgePairs = [];
+  function buildEdgePairs() {
+    edgePairs = [];
+    for (let i = 0; i < n; i++) {
+      if (rocks[i].dead) continue;
+      for (const j of rocks[i].neighbors || [])
+        if (j > i && !rocks[j].dead) edgePairs.push([i, j]);
+    }
+  }
+  buildEdgePairs();
   const netGeo = new THREE.BufferGeometry();
   const netPos = new Float32Array(edgePairs.length * 6);
   function writeNet() {
@@ -376,6 +398,7 @@ export function createAsteroidView(scene, world, camCtl) {
       netPos[o + 4] = b.y;
       netPos[o + 5] = -2.2;
     }
+    netGeo.setDrawRange(0, edgePairs.length * 2);
   }
   writeNet();
   netGeo.setAttribute("position", new THREE.BufferAttribute(netPos, 3));
@@ -498,19 +521,107 @@ export function createAsteroidView(scene, world, camCtl) {
   rallyFlags.position.z = -1;
   scene.add(rallyFlags);
 
+  // --- Bombard battery telegraph: a menacing additive ring on every ARMED rock, pulsing.
+  //     A CHARGING rock (rock.bombard set) pulses brighter/faster, scaled by charge progress.
+  //     One instanced ring layer, count set each frame from the live armed/charging set. ---
+  const battery = new THREE.InstancedMesh(
+    new THREE.RingGeometry(0.82, 1.0, 40),
+    new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      vertexColors: true,
+    }),
+    Math.max(1, n),
+  );
+  battery.instanceColor = new THREE.InstancedBufferAttribute(
+    new Float32Array(Math.max(1, n) * 3),
+    3,
+  );
+  battery.frustumCulled = false;
+  battery.count = 0;
+  battery.position.z = -1.5;
+  scene.add(battery);
+  const batCol = new THREE.Color();
+  let clock = 0; // seconds, advanced each frame for the pulse
+
+  // --- Charge beams: an additive/bloom laser from each charging battery to its target, growing
+  //     as the charge resolves. One LineSegments rebuilt per frame from the charging set. ---
+  const beamGeo = new THREE.BufferGeometry();
+  let beamPos = new Float32Array(0);
+  let beamCap = -1;
+  const beam = new THREE.LineSegments(
+    beamGeo,
+    new THREE.LineBasicMaterial({
+      color: 0xff5a3c,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  beam.frustumCulled = false;
+  beam.visible = false;
+  beam.position.z = -1;
+  scene.add(beam);
+
   function setSelected(id) {
     selectedId = id;
-    selRing.visible = !!rocks[id];
+    selRing.visible = !!rocks[id] && !rocks[id].dead;
   }
   function clearSelected() {
     selectedId = -1;
     selRing.visible = false;
   }
 
-  function update() {
-    // owner-tint rims on change
+  // processDeaths — once per frame: find bodies that JUST became dead and do the one-shot hide.
+  // For an asteroid, zero-scale its rock-mesh instance; for a planet/star/blackhole, hide its
+  // stored mesh + halo. Always hide the owner rim (zero-scale its instance). Spawn an explosion
+  // burst (fx, if provided) at the body, then rebuild the neighbor network so its edges vanish.
+  function processDeaths() {
+    let netDirty = false;
+    let rockDirty = false;
+    for (let i = 0; i < n; i++) {
+      if (!rocks[i].dead || deadSeen[i]) continue;
+      deadSeen[i] = 1;
+      const a = rocks[i];
+      if (bodyMesh[i]) bodyMesh[i].visible = false;
+      if (bodyHalo[i]) bodyHalo[i].visible = false;
+      if (rockLi[i] >= 0) {
+        dummy.position.set(0, 0, -2);
+        dummy.scale.set(0, 0, 0);
+        dummy.updateMatrix();
+        rockMesh.setMatrixAt(rockLi[i], dummy.matrix);
+        rockDirty = true;
+      }
+      // Hide the owner rim by zero-scaling its instance (off-screen + no area).
+      dummy.position.set(0, 0, -1.9);
+      dummy.scale.set(0, 0, 0);
+      dummy.updateMatrix();
+      rims.setMatrixAt(i, dummy.matrix);
+      if (selectedId === i) clearSelected();
+      if (fx && fx.spawnExplosion)
+        fx.spawnExplosion(a.x, a.y, ownerColorHex(lastOwner[i]));
+      netDirty = true;
+    }
+    if (rockDirty) rockMesh.instanceMatrix.needsUpdate = true;
+    if (netDirty) {
+      rims.instanceMatrix.needsUpdate = true;
+      buildEdgePairs();
+      writeNet();
+      netGeo.attributes.position.needsUpdate = true;
+    }
+  }
+
+  function update(dt = 0) {
+    clock += dt;
+    // owner-tint rims on change. lastOwner snapshots the owner BEFORE a death sets it NEUTRAL,
+    // so processDeaths can color the explosion with the body's last owner (read before this).
     let dirty = false;
     for (let i = 0; i < n; i++) {
+      if (rocks[i].dead) continue; // dead rim is hidden (zero-scaled), don't recolor it
       const o = rocks[i].owner;
       if (o !== lastOwner[i]) {
         ownerColor(col, o);
@@ -521,10 +632,15 @@ export function createAsteroidView(scene, world, camCtl) {
     }
     if (dirty && rims.instanceColor) rims.instanceColor.needsUpdate = true;
 
+    // One-shot hide for bodies that just died (must run before moving-body rewrites so a dead
+    // moon's rim isn't re-shown). Reads lastOwner above for the explosion tint.
+    processDeaths();
+
     // moving bodies (moons / satellites / binaries): update body + rim, and the network edges
     if (hasMoving) {
       for (const id of movingIds) {
         const a = rocks[id];
+        if (a.dead) continue; // destroyed body stays hidden — never re-place its instances
         dummy.position.set(a.x, a.y, -2);
         dummy.scale.set(a.radius, a.radius, 1);
         dummy.updateMatrix();
@@ -550,6 +666,88 @@ export function createAsteroidView(scene, world, camCtl) {
 
     updateGlow();
     updateRally();
+    updateBattery();
+    updateBeams();
+  }
+
+  // updateBattery — pulsing ring on every armed/charging live battery. Armed = steady menacing
+  // pulse; charging = brighter/faster pulse scaled by charge progress (1 = just fired → 0). One
+  // instanced layer; count = number of armed-or-charging live rocks this frame.
+  function updateBattery() {
+    let m = 0;
+    for (let i = 0; i < n; i++) {
+      const a = rocks[i];
+      if (a.dead) continue;
+      const charging = !!a.bombard;
+      if (!a.armed && !charging) continue;
+      let prog = 0; // charge progress 0→1 as charge ticks down to 0
+      if (charging)
+        prog = 1 - Math.max(0, Math.min(1, a.bombard.charge / CHARGE_TICKS));
+      // Pulse: slow menacing throb when armed; fast, intensifying when charging.
+      const speed = charging ? 9 + prog * 9 : 3.2;
+      const pulse = 0.5 + 0.5 * Math.sin(clock * speed);
+      const grow = charging ? 1.18 + prog * 0.5 : 1.12;
+      const rr = a.radius * (grow + pulse * (charging ? 0.18 : 0.1));
+      dummy.position.set(a.x, a.y, -1.5);
+      dummy.scale.set(rr, rr, 1);
+      dummy.updateMatrix();
+      battery.setMatrixAt(m, dummy.matrix);
+      // Armed = orange-red; charging = hotter, brighter toward white as it resolves.
+      const bright = charging
+        ? 0.7 + prog * 0.3 + pulse * 0.2
+        : 0.55 + pulse * 0.3;
+      if (charging) batCol.setRGB(1, 0.45 + prog * 0.4, 0.2 + prog * 0.3);
+      else batCol.setHex(0xff5a28);
+      batCol.multiplyScalar(bright);
+      battery.setColorAt(m, batCol);
+      m++;
+    }
+    battery.count = m;
+    if (m > 0) {
+      battery.instanceMatrix.needsUpdate = true;
+      if (battery.instanceColor) battery.instanceColor.needsUpdate = true;
+    }
+  }
+
+  // updateBeams — additive laser from each charging battery to its target, growing taut as the
+  // charge resolves (jitter shrinks). Rebuilt every frame from the live charging set; hidden
+  // when nothing is charging.
+  function updateBeams() {
+    const pairs = [];
+    for (let i = 0; i < n; i++) {
+      const a = rocks[i];
+      if (a.dead || !a.bombard) continue;
+      const t = rocks[a.bombard.target];
+      if (!t || t.dead) continue;
+      const prog =
+        1 - Math.max(0, Math.min(1, a.bombard.charge / CHARGE_TICKS));
+      pairs.push([a, t, prog]);
+    }
+    if (pairs.length === 0) {
+      beam.visible = false;
+      return;
+    }
+    if (pairs.length * 2 !== beamCap) {
+      beamCap = pairs.length * 2;
+      beamPos = new Float32Array(pairs.length * 6);
+      beamGeo.setAttribute("position", new THREE.BufferAttribute(beamPos, 3));
+    }
+    for (let k = 0; k < pairs.length; k++) {
+      const [a, t] = pairs[k];
+      const o = k * 6;
+      beamPos[o] = a.x;
+      beamPos[o + 1] = a.y;
+      beamPos[o + 2] = -1;
+      beamPos[o + 3] = t.x;
+      beamPos[o + 4] = t.y;
+      beamPos[o + 5] = -1;
+    }
+    beamGeo.setDrawRange(0, pairs.length * 2);
+    beamGeo.attributes.position.needsUpdate = true;
+    // Brighten + flicker the beam as the worst charge in the set resolves.
+    const maxProg = pairs.reduce((mx, p) => Math.max(mx, p[2]), 0);
+    beam.material.opacity = 0.45 + maxProg * 0.5 + 0.1 * Math.sin(clock * 40);
+    beam.visible = true;
   }
 
   function updateGlow() {
@@ -565,6 +763,14 @@ export function createAsteroidView(scene, world, camCtl) {
     }
     for (let i = 0; i < n; i++) {
       const a = rocks[i];
+      if (a.dead) {
+        // Destroyed body emits no glow — zero-scale its instance out of view.
+        dummy.position.set(0, 0, 0);
+        dummy.scale.set(0, 0, 0);
+        dummy.updateMatrix();
+        glow.setMatrixAt(i, dummy.matrix);
+        continue;
+      }
       const k = Math.min(1, orbitCount[i] / 30);
       const rr = a.radius * (1.4 + k * 2.6);
       dummy.position.set(a.x, a.y, 0);

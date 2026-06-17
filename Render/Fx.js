@@ -97,6 +97,24 @@ export function createFx(scene, world) {
     }
   }
 
+  // Big destruction burst when a body is bombarded to death — far more particles, faster and
+  // longer-lived than spawnDeath, in two waves (a hot white flash + a colored shell) so the
+  // kill reads as a superweapon hit. Still bounded by the shared POOL ring.
+  function spawnExplosion(x, y, hex = 0xffb04a) {
+    const flash = Math.max(8, Math.round(28 * COUNT_K));
+    for (let k = 0; k < flash; k++) {
+      const a = (k / flash) * TAU;
+      const sp = (180 + Math.random() * 160) * SPEED_K;
+      emit(x, y, Math.cos(a), Math.sin(a), sp, 0.9 * LIFE_K, 0xffffff);
+    }
+    const shell = Math.max(8, Math.round(36 * COUNT_K));
+    for (let k = 0; k < shell; k++) {
+      const a = Math.random() * TAU;
+      const sp = (90 + Math.random() * 220) * SPEED_K;
+      emit(x, y, Math.cos(a), Math.sin(a), sp, 1.3 * LIFE_K, hex);
+    }
+  }
+
   // Age + recycle. Dead particles drop to black so they stop contributing to bloom.
   function update(dt) {
     for (let i = 0; i < POOL; i++) {
@@ -118,5 +136,5 @@ export function createFx(scene, world) {
     geo.attributes.color.needsUpdate = true;
   }
 
-  return { points, spawnSend, spawnDeath, spawnFlower, update };
+  return { points, spawnSend, spawnDeath, spawnFlower, spawnExplosion, update };
 }

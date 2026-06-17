@@ -30,6 +30,7 @@ export function createPicking(scene, camera, canvas, world) {
     let bestId = -1;
     let bestD2 = Infinity;
     for (const a of w.asteroids) {
+      if (a.dead) continue; // destroyed body — can't be selected/targeted/dragged
       const dx = hit.x - a.x;
       const dy = hit.y - a.y;
       const d2 = dx * dx + dy * dy;

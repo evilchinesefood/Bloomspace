@@ -8,6 +8,7 @@
 import { sendSeedlings, setRally } from "../Sim/Seedlings.js";
 import { tryConnect } from "../Sim/MapGen.js";
 import { plantTree } from "../Sim/Trees.js";
+import { fireBombard, isArmed } from "../Sim/Bombard.js";
 import { buyTech } from "../Sim/Tech.js";
 import { ownerColorHex } from "../Render/Palette.js";
 import { WORLD_STATUS } from "../Sim/World.js";
@@ -29,6 +30,7 @@ export function createInput({
   let pointerId = null;
   let rallyMode = false; // armed: next click sets the selected rock's rally point
   let connectMode = false; // armed: next click links the selected rock to another owned body
+  let fireMode = false; // armed: next click on ANY body fires the selected battery at it
   const activeTouches = new Set(); // live touch pointers — 2+ means a camera gesture, not select
 
   function selectedId() {
@@ -36,17 +38,24 @@ export function createInput({
   }
   function setRallyMode(on) {
     rallyMode = !!on;
-    if (rallyMode) connectMode = false; // the two arm-modes are mutually exclusive
+    if (rallyMode) connectMode = fireMode = false; // arm-modes are mutually exclusive
   }
   function isRallyMode() {
     return rallyMode;
   }
   function setConnectMode(on) {
     connectMode = !!on;
-    if (connectMode) rallyMode = false;
+    if (connectMode) rallyMode = fireMode = false;
   }
   function isConnectMode() {
     return connectMode;
+  }
+  function setFireMode(on) {
+    fireMode = !!on;
+    if (fireMode) rallyMode = connectMode = false;
+  }
+  function isFireMode() {
+    return fireMode;
   }
 
   function select(id) {
@@ -111,6 +120,23 @@ export function createInput({
       if (clicked < 0) return; // missed — keep armed
       if (clicked !== src) tryConnect(world, src, clicked, HUMAN);
       connectMode = false;
+      return;
+    }
+
+    // Fire mode: the FIRST click on ANY body fires the selected armed battery at it (self/star/
+    // blackhole all allowed by fireBombard). An empty-space miss stays armed (like rally), so a
+    // near-miss never silently wastes the arm. Disarms only when a body is actually clicked or
+    // the selected rock is no longer a valid armed source.
+    if (fireMode) {
+      const src = selectedId();
+      const srcRock = src >= 0 ? world.asteroids[src] : null;
+      if (!srcRock || srcRock.owner !== HUMAN || !isArmed(srcRock)) {
+        fireMode = false; // nothing valid to fire — disarm
+        return;
+      }
+      if (clicked < 0) return; // missed a body — keep armed, try again
+      fireBombard(world, src, clicked, HUMAN);
+      fireMode = false;
       return;
     }
 
@@ -208,6 +234,7 @@ export function createInput({
     if (e.key === "Escape") {
       rallyMode = false;
       connectMode = false;
+      fireMode = false;
     }
   }
 
@@ -234,6 +261,8 @@ export function createInput({
     isRallyMode,
     setConnectMode,
     isConnectMode,
+    setFireMode,
+    isFireMode,
     destroy,
   };
 }

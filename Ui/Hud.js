@@ -6,6 +6,14 @@ import { el } from "./Menus.js";
 import { ownerColorHex } from "../Render/Palette.js";
 import { createMinimap } from "../Render/Minimap.js";
 import { TREE_SEED_COST, TREE_ENERGY_COST } from "../Sim/Trees.js";
+import {
+  BATTERY_SIZE,
+  BOMBARD_SEED_COST,
+  BOMBARD_ENERGY_COST,
+  countBombard,
+  matureBombardCount,
+  isArmed,
+} from "../Sim/Bombard.js";
 import { CONNECT_ENERGY_COST } from "../Sim/MapGen.js";
 import { KIND } from "../Sim/World.js";
 import { TECH, MAX_TIER, techCost } from "../Sim/Tech.js";
@@ -386,6 +394,41 @@ export function createHud(root, api) {
   });
   root.append(connectBanner);
 
+  // FIRE arming banner — an alarming red top-center cue while the player picks a bombard target.
+  const fireBanner = el("div", {
+    style:
+      "position:absolute;top:70px;left:50%;transform:translateX(-50%);pointer-events:none;" +
+      "display:none;align-items:center;gap:.5rem;padding:.5rem .9rem;border-radius:999px;" +
+      "background:rgba(255,70,40,.18);border:1px solid rgba(255,90,60,.8);color:#ffd0c4;" +
+      "font:700 .85rem system-ui;white-space:nowrap;box-shadow:0 2px 18px rgba(255,70,40,.35);",
+    html:
+      '<i class="fa-solid fa-crosshairs"></i>' +
+      "Click a target to bombard — Esc to cancel",
+  });
+  root.append(fireBanner);
+
+  // Enemy-bombardment WARNING banner — pinned a row BELOW the arming banners so it can show at
+  // the same time (e.g. you're arming while an enemy is charging). Pulses to draw the eye.
+  const warnBanner = el("div", {
+    style:
+      "position:absolute;top:116px;left:50%;transform:translateX(-50%);pointer-events:none;" +
+      "display:none;align-items:center;gap:.5rem;padding:.45rem .85rem;border-radius:999px;" +
+      "background:rgba(255,40,40,.2);border:1px solid rgba(255,70,70,.85);color:#ffd2d2;" +
+      "font:800 .82rem system-ui;white-space:nowrap;box-shadow:0 2px 20px rgba(255,40,40,.4);" +
+      "animation:bsWarnPulse 1s ease-in-out infinite;",
+    html: '<i class="fa-solid fa-triangle-exclamation"></i>Enemy bombardment charging!',
+  });
+  root.append(warnBanner);
+  // One-time keyframes for the warning pulse (idempotent — guard on a sentinel id).
+  if (!document.getElementById("BsWarnKeyframes")) {
+    const st = el("style", {
+      id: "BsWarnKeyframes",
+      textContent:
+        "@keyframes bsWarnPulse{0%,100%{opacity:.7;}50%{opacity:1;}}",
+    });
+    document.head.append(st);
+  }
+
   // --- Minimap (whole-map overview, bottom-right) ----------------------------
   // Visuals only: reads the world + camera view rect, click/drag re-centers the camera.
   const minimap = createMinimap(root, api.getWorld, {
@@ -480,6 +523,33 @@ export function createHud(root, api) {
   plantSeedBtn.addEventListener("click", () => api.onPlant("seedling"));
   plantDefBtn.addEventListener("click", () => api.onPlant("defense"));
 
+  // Plant Bombard Tree — escalating cost per current count, capped at BATTERY_SIZE. Five mature
+  // bombard trees arm the rock as a superweapon battery.
+  const plantBombBtn = el("wa-button", {
+    size: "small",
+    style: "width:100%;margin-top:.4rem;",
+    html: '<i slot="start" class="fa-solid fa-meteor"></i>Plant Bombard Tree',
+  });
+  plantBombBtn.addEventListener("click", () => api.onPlant("bombard"));
+
+  // Bombard battery status line (count / mature / armed / charging).
+  const bombStatusEl = el("div", {
+    style: "margin-top:.5rem;font:600 .8rem system-ui;",
+    textContent: "",
+  });
+
+  // FIRE — shown only when the selected owned rock is armed and not already charging. Arms the
+  // input's fire-mode (next click on any body fires), mirroring the rally button's toggle.
+  const fireBtn = el("wa-button", {
+    size: "small",
+    variant: "danger",
+    style: "width:100%;margin-top:.4rem;",
+    html: '<i slot="start" class="fa-solid fa-crosshairs"></i>FIRE',
+  });
+  fireBtn.addEventListener("click", () =>
+    api.setFireMode(!(api.isFireMode && api.isFireMode())),
+  );
+
   // Rally (anchor) point: arms a one-click target pick; new seedlings produced here then
   // auto-move to that target. Clicking this rock itself (while arming) clears the rally.
   const rallyBtn = el("wa-button", {
@@ -528,6 +598,9 @@ export function createHud(root, api) {
     sendSlider,
     plantSeedBtn,
     plantDefBtn,
+    plantBombBtn,
+    bombStatusEl,
+    fireBtn,
     rallyBtn,
     connectBtn,
     inboundBtn,
@@ -554,10 +627,12 @@ export function createHud(root, api) {
     energyEl.textContent = `Stored energy: ${Math.round(a.energy)}`;
     const seedT = a.trees.filter((t) => t.type === "seedling").length;
     const defT = a.trees.filter((t) => t.type === "defense").length;
+    const bombT = countBombard(a);
     treesEl.textContent =
       a.trees.length === 0
         ? "No trees."
-        : `Trees: ${seedT} seedling, ${defT} defense`;
+        : `Trees: ${seedT} seedling, ${defT} defense` +
+          (bombT ? `, ${bombT} bombard` : "");
 
     // Orbiting ships at this body (fighters / defenders / enemies). Selected-body only.
     const oc = orbitCounts(world, id, HUMAN);
@@ -575,6 +650,9 @@ export function createHud(root, api) {
     sendSlider.style.display = owned ? "" : "none";
     plantSeedBtn.style.display = owned ? "" : "none";
     plantDefBtn.style.display = owned ? "" : "none";
+    plantBombBtn.style.display = owned ? "" : "none";
+    bombStatusEl.style.display = owned ? "" : "none";
+    fireBtn.style.display = "none"; // shown below only when owned + armed + not charging
     rallyBtn.style.display = owned ? "" : "none";
     connectBtn.style.display = owned ? "" : "none";
     hint.style.display = owned ? "" : "none";
@@ -589,6 +667,55 @@ export function createHud(root, api) {
         : `Need ${TREE_SEED_COST} seeds + ${TREE_ENERGY_COST} energy`;
       plantSeedBtn.title = why;
       plantDefBtn.title = why;
+
+      // --- Bombard battery: plant button (count N/5 + escalating cost), status, FIRE button ---
+      const bcount = countBombard(a);
+      const bfull = bcount >= BATTERY_SIZE;
+      const bSeedCost = bfull ? 0 : BOMBARD_SEED_COST[bcount];
+      const bEnergyCost = bfull ? 0 : BOMBARD_ENERGY_COST[bcount];
+      const bAfford = !bfull && seeds >= bSeedCost && a.energy >= bEnergyCost;
+      setProp(plantBombBtn, "disabled", bfull || !bAfford);
+      setHtml(
+        plantBombBtn,
+        bfull
+          ? `<i slot="start" class="fa-solid fa-meteor"></i>Battery full (${BATTERY_SIZE}/${BATTERY_SIZE})`
+          : `<i slot="start" class="fa-solid fa-meteor"></i>Plant Bombard Tree ${bcount}/${BATTERY_SIZE} (${bSeedCost}🌱 ${bEnergyCost}⚡)`,
+      );
+      plantBombBtn.title = bfull
+        ? "Battery is full — 5 bombard trees planted"
+        : bAfford
+          ? `Plant bombard tree ${bcount + 1}/${BATTERY_SIZE} for ${bSeedCost} seeds + ${bEnergyCost} energy`
+          : `Need ${bSeedCost} seeds + ${bEnergyCost} energy`;
+
+      const mature = matureBombardCount(a);
+      const armed = isArmed(a);
+      const charging = !!a.bombard;
+      bombStatusEl.style.color = charging
+        ? "#ff6b4a"
+        : armed
+          ? "#ffd24b"
+          : "rgba(255,255,255,.7)";
+      bombStatusEl.textContent = charging
+        ? `Bombard: CHARGING → #${a.bombard.target}`
+        : armed
+          ? `Bombard battery ARMED (${mature}/${BATTERY_SIZE} mature)`
+          : bcount > 0
+            ? `Bombard battery: ${bcount}/${BATTERY_SIZE} (${mature} mature)`
+            : "";
+      bombStatusEl.style.display =
+        owned && (bcount > 0 || armed || charging) ? "" : "none";
+
+      // FIRE button only when armed AND not already charging.
+      const showFire = armed && !charging;
+      fireBtn.style.display = showFire ? "" : "none";
+      const firing = api.isFireMode && api.isFireMode();
+      setProp(fireBtn, "variant", firing ? "brand" : "danger");
+      setHtml(
+        fireBtn,
+        firing
+          ? '<i slot="start" class="fa-solid fa-xmark"></i>Cancel fire'
+          : '<i slot="start" class="fa-solid fa-crosshairs"></i>FIRE',
+      );
 
       const arming = api.isRallyMode();
       setProp(rallyBtn, "variant", arming ? "brand" : "neutral");
@@ -618,11 +745,13 @@ export function createHud(root, api) {
         a.energy < CONNECT_ENERGY_COST
           ? `Needs ${CONNECT_ENERGY_COST} stored energy on this body`
           : `Link to another body you control for ${CONNECT_ENERGY_COST} energy`;
-      hint.textContent = arming
-        ? "Click a target asteroid to set the rally (click this rock to clear)."
-        : connecting
-          ? "Click another body you control to build a permanent link."
-          : "Drag from this asteroid to a target to send seedlings.";
+      hint.textContent = firing
+        ? "Click any body to bombard it — Esc to cancel."
+        : arming
+          ? "Click a target asteroid to set the rally (click this rock to clear)."
+          : connecting
+            ? "Click another body you control to build a permanent link."
+            : "Drag from this asteroid to a target to send seedlings.";
     }
 
     // Inbound-rally toggle works for ANY selected body (e.g. inspect which of your rocks
@@ -649,6 +778,17 @@ export function createHud(root, api) {
       api.isRallyMode && api.isRallyMode() ? "flex" : "none";
     connectBanner.style.display =
       api.isConnectMode && api.isConnectMode() ? "flex" : "none";
+    fireBanner.style.display =
+      api.isFireMode && api.isFireMode() ? "flex" : "none";
+    // Enemy-bombardment warning: any live non-human battery currently charging.
+    let enemyCharging = false;
+    for (const r of world.asteroids) {
+      if (r.bombard && !r.dead && r.owner !== HUMAN) {
+        enemyCharging = true;
+        break;
+      }
+    }
+    warnBanner.style.display = enemyCharging ? "flex" : "none";
     renderPanel(world);
     minimap.update();
   }
@@ -668,6 +808,8 @@ export function createHud(root, api) {
     panel.remove();
     rallyBanner.remove();
     connectBanner.remove();
+    fireBanner.remove();
+    warnBanner.remove();
     minimap.destroy();
     window.removeEventListener("keydown", onKey);
   }

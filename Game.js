@@ -61,10 +61,10 @@ export function createGame(canvas, config = {}) {
   // Views take the scene controller so SeedlingView/AsteroidView can read live zoom +
   // camera frustum for culling/LOD. New match starts framed at fit-all.
   scene.resetCamera();
-  const asteroids = createAsteroidView(scene.scene, world, scene);
+  const fx = createFx(scene.scene, world);
+  const asteroids = createAsteroidView(scene.scene, world, scene, fx);
   const seedlings = createSeedlingView(scene.scene, world, scene);
   const trees = createTreeView(scene.scene, world);
-  const fx = createFx(scene.scene, world);
   const picking = createPicking(scene.scene, scene.camera, canvas, world);
   // Non-authoritative audio: starts suspended, unlocks on first user gesture, consumes the
   // same event channel the FX drain reads. Owns no game truth. Defaults enabled; the real
@@ -126,7 +126,7 @@ export function createGame(canvas, config = {}) {
       else if (type === EVENT.CAPTURE) sound.play("capture");
       else if (type === EVENT.WIN) sound.play("win");
       else if (type === EVENT.LOSE) sound.play("lose");
-      else if (type === EVENT.FIRE) sound.play("fire"); // reserved; no emitter yet
+      else if (type === EVENT.FIRE) sound.play("fire"); // bombardment battery fire-start
     }
     ev.n = 0;
     sound.endFrame(); // reset per-frame SFX throttle counters
@@ -138,7 +138,7 @@ export function createGame(canvas, config = {}) {
     }
 
     scene.driftStars(dt);
-    asteroids.update();
+    asteroids.update(dt);
     seedlings.update(alpha);
     trees.update();
     fx.update(dt);
