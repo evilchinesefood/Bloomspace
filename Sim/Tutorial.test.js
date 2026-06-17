@@ -8,7 +8,7 @@
 // module load), so TUTORIAL_CONFIG + the pure STEPS predicates import cleanly under Node.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createWorld, OWNER_NEUTRAL } from "./World.js";
+import { createWorld, OWNER_NEUTRAL, WORLD_STATUS } from "./World.js";
 import { TUTORIAL_CONFIG, STEPS } from "../Ui/Tutorial.js";
 
 // Build the tutorial world from the locked config (fresh player copies so per-player mutation —
@@ -164,6 +164,6 @@ test("step predicates fire on the right sim state and not before", () => {
 
   // Step 5: defeat the enemy — status "won".
   assert.equal(win.done(w), false, "status playing → step 5 not done");
-  w.status = "won";
+  w.status = WORLD_STATUS.WON;
   assert.equal(win.done(w), true, "status won → step 5 done");
 });

@@ -8,6 +8,7 @@
 // so the small map reliably supports every step — home rock with orbiting seedlings, a neutral
 // reachable from home to colonize, and one passive (difficulty-0 "Easy") AI that never attacks.
 import { el } from "./Menus.js";
+import { WORLD_STATUS } from "../Sim/World.js";
 
 // The locked tutorial match config. Small fixed-seed map, specials OFF (so a first-timer isn't
 // confused by nebula/belt/rich), one human + one passive Easy AI. Pinned: SEED 1 yields a clean
@@ -76,7 +77,7 @@ export const STEPS = [
     title: "Defeat the enemy",
     prompt:
       "Send your seedlings to wipe out the enemy bloom. Take every one of their rocks to win!",
-    done: (world) => world.status === "won",
+    done: (world) => world.status === WORLD_STATUS.WON,
   },
 ];
 
@@ -177,9 +178,9 @@ export function createTutorial(root, api) {
     // step (so a fast/lucky win never leaves a stale prompt up). lost/draw are practically
     // impossible vs the passive AI but handled the same way defensively.
     if (
-      world.status === "won" ||
-      world.status === "lost" ||
-      world.status === "draw"
+      world.status === WORLD_STATUS.WON ||
+      world.status === WORLD_STATUS.LOST ||
+      world.status === WORLD_STATUS.DRAW
     ) {
       finished = true;
       render();
@@ -216,5 +217,3 @@ export function createTutorial(root, api) {
     },
   };
 }
-
-export default { createTutorial, STEPS, TUTORIAL_CONFIG };
