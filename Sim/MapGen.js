@@ -345,10 +345,17 @@ const isLeaf = (asteroids, i) =>
 // (array of neighbor Sets, mutated in place) until the whole graph is one component. Leaves
 // hang off their anchor (already linked), so the union-find runs over every body but bridge
 // candidates are non-leaves only. Shared by buildNeighbors (initial bridge) and the belt
-// edge-removal post-pass (re-bridge after crossing edges are cut). NO rng. Same algorithm in
-// both call sites so an OFF world's graph is byte-identical to before this was factored out.
-function ensureConnected(asteroids, adj) {
+// edge-removal post-pass (re-bridge after crossing edges are cut). NO rng.
+//
+// `opts.avoid(i,j)` (OPTIONAL) marks an edge as undesirable (a belt-crossing edge). When given,
+// each iteration prefers the shortest cross-component NON-avoided edge, and only falls back to
+// the shortest avoided "gateway" edge if no non-avoided edge connects any two components that
+// iteration (connectivity is still guaranteed). When `avoid` is ABSENT (the buildNeighbors
+// call), behavior is EXACTLY as before — the shortest cross-component edge with a strict d<bd
+// tiebreak — so OFF-path graphs stay byte-identical.
+function ensureConnected(asteroids, adj, opts = {}) {
   const n = asteroids.length;
+  const avoid = opts.avoid;
   const parent = asteroids.map((_, i) => i);
   const find = (x) => {
     while (parent[x] !== x) x = parent[x] = parent[parent[x]];
@@ -362,20 +369,35 @@ function ensureConnected(asteroids, adj) {
     return r.size;
   };
   while (comps() > 1) {
+    // Best preferred (non-avoided) edge and best fallback (avoided) edge this iteration.
     let bi = -1;
     let bj = -1;
     let bd = Infinity;
+    let fi = -1;
+    let fj = -1;
+    let fd = Infinity;
     for (let i = 0; i < n; i++)
       for (let j = i + 1; j < n; j++) {
         if (isLeaf(asteroids, i) || isLeaf(asteroids, j) || find(i) === find(j))
           continue;
         const d = dist(asteroids[i], asteroids[j]);
-        if (d < bd) {
+        if (avoid && avoid(i, j)) {
+          if (d < fd) {
+            fd = d;
+            fi = i;
+            fj = j;
+          }
+        } else if (d < bd) {
           bd = d;
           bi = i;
           bj = j;
         }
       }
+    // Prefer a non-avoided edge; only bridge across the belt if nothing else connects.
+    if (bi < 0) {
+      bi = fi;
+      bj = fj;
+    }
     if (bi < 0) break;
     adj[bi].add(bj);
     adj[bj].add(bi);
@@ -532,10 +554,13 @@ function tagSpecials(world, homes) {
 // applyBeltEdgeRemoval — POST-PASS on the already-built graph. For every ANCHOR–ANCHOR edge
 // (never a leaf's single parent edge), drop it if the body-to-body segment crosses any belt
 // circle — this forces ships to route AROUND the belt. After removal the graph may be
-// disconnected, so ensureConnected re-adds the minimal cross-component anchor edge(s); a
-// re-added "gateway" edge MAY cross the belt (a belt impedes but must never make a body
-// unreachable). Mutates each body's .neighbors and rebuilds world.nav. NO rng — runs purely on
-// the static graph + belt geometry, so it never shifts the base body/home/seedling layout.
+// disconnected, so ensureConnected re-bridges it BELT-AWARE: it prefers the shortest
+// NON-crossing cross-component edge, and only falls back to a belt-crossing "gateway" when no
+// non-crossing edge can reconnect the components (a belt impedes but must never make a body
+// unreachable). So the belt forces a real detour wherever one exists, yet a belt that would
+// genuinely partition the map keeps a single gateway. Mutates each body's .neighbors and
+// rebuilds world.nav. NO rng — runs on the static graph + belt geometry, so it never shifts the
+// base body/home/seedling layout.
 export function applyBeltEdgeRemoval(world) {
   const { asteroids, belts } = world;
   if (!belts || belts.length === 0) return;
@@ -559,8 +584,10 @@ export function applyBeltEdgeRemoval(world) {
       }
     }
   }
-  // Re-bridge any components the removal split off (same logic buildNeighbors uses).
-  ensureConnected(asteroids, adj);
+  // Re-bridge any components the removal split off — but BELT-AWARE: prefer a non-crossing
+  // gateway so the belt forces a real detour wherever one exists; only re-add a belt-crossing
+  // edge when no non-crossing edge can reconnect the components (connectivity over purity).
+  ensureConnected(asteroids, adj, { avoid: crosses });
   for (let i = 0; i < n; i++)
     asteroids[i].neighbors = Array.from(adj[i]).sort((a, b) => a - b);
   rebuildNav(world);

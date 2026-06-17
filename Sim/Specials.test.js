@@ -371,6 +371,163 @@ test("belt connectivity invariant holds across many seeds (id===index too)", () 
   }
 });
 
+// Size-parameterized world (the default mk is 2000×2000). Used to exercise belt routing/
+// connectivity across the real skirmish map sizes.
+function mkSize(seed, w, h, specials = true) {
+  return createWorld({
+    seed,
+    asteroidCount: 26,
+    planetMin: 1,
+    planetMax: 2,
+    players: PLAYERS.map((p) => ({ ...p })),
+    width: w,
+    height: h,
+    specials,
+  });
+}
+// Set of "i,j" (i<j) anchor–anchor edges in a world's travel graph.
+function anchorEdges(w) {
+  const s = new Set();
+  for (let i = 0; i < w.asteroids.length; i++) {
+    if (isLeaf(w.asteroids[i])) continue;
+    for (const j of w.asteroids[i].neighbors)
+      if (j > i && !isLeaf(w.asteroids[j])) s.add(i + "," + j);
+  }
+  return s;
+}
+const edgeCrossesBelt = (w, i, j) => {
+  const A = w.asteroids[i];
+  const B = w.asteroids[j];
+  return (w.belts || []).some((z) =>
+    segHitsCircle(A.x, A.y, B.x, B.y, z.x, z.y, z.radius),
+  );
+};
+
+// Net routing change: the belt must, in the COMMON case across sizes/seeds, remove an
+// anchor edge that is NOT re-added (a real detour). This locks in F7b's purpose against a
+// regression back to the belt-blind no-op. We don't require EVERY world to change (a belt can
+// legitimately land in open space with nothing to cross), but the strong majority must.
+test("procedural belt changes routing in the common case (multi-seed × multi-size)", () => {
+  const sizes = [
+    [1100, 1100],
+    [1700, 1700],
+    [2400, 2400],
+  ];
+  const seeds = [1, 2, 3, 7, 13, 42, 101, 777, 2024, 99999, 123456, 654321];
+  let worlds = 0;
+  let changed = 0;
+  let crossingReadds = 0;
+  for (const seed of seeds)
+    for (const [w, h] of sizes) {
+      const off = mkSize(seed, w, h, false);
+      const on = mkSize(seed, w, h, true);
+      worlds++;
+      const offAA = anchorEdges(off);
+      const onAA = anchorEdges(on);
+      // A real detour exists iff some OFF crossing edge is gone in ON.
+      let netRemoved = false;
+      for (const e of offAA) {
+        const [i, j] = e.split(",").map(Number);
+        if (edgeCrossesBelt(on, i, j) && !onAA.has(e)) {
+          netRemoved = true;
+          break;
+        }
+      }
+      if (netRemoved) changed++;
+      // Tally any crossing edge still PRESENT in ON (a re-added/forced gateway).
+      for (const e of onAA) {
+        const [i, j] = e.split(",").map(Number);
+        if (edgeCrossesBelt(on, i, j)) crossingReadds++;
+      }
+    }
+  // Strong majority of worlds get a real routing change (the belt is not a no-op).
+  assert.ok(
+    changed >= Math.ceil(worlds * 0.6),
+    `belt should change routing in ≥60% of worlds, got ${changed}/${worlds} (crossingReadds=${crossingReadds})`,
+  );
+});
+
+// Belt-aware re-bridge: every belt-crossing anchor edge that SURVIVES in the final ON graph
+// must be a genuine GATEWAY — i.e. removing it disconnects the graph. If any surviving crossing
+// edge could be dropped while the graph stays connected, the re-bridge was belt-BLIND (it
+// re-added an avoidable crossing). This is the regression guard for Fix 1.
+test("belt-aware re-bridge re-adds NO avoidable crossing edges (every surviving crossing is a forced gateway)", () => {
+  const sizes = [
+    [1100, 1100],
+    [1700, 1700],
+    [2400, 2400],
+  ];
+  const seeds = [0, 1, 2, 5, 11, 29, 58, 137, 404, 9001, 271828, 8675309];
+  // connected ignoring one specific undirected edge (i,j)
+  const connectedWithout = (w, ei, ej) => {
+    const n = w.asteroids.length;
+    const seen = new Uint8Array(n);
+    const q = [0];
+    seen[0] = 1;
+    let qi = 0;
+    while (qi < q.length) {
+      const cur = q[qi++];
+      for (const nb of w.asteroids[cur].neighbors) {
+        if ((cur === ei && nb === ej) || (cur === ej && nb === ei)) continue;
+        if (!seen[nb]) {
+          seen[nb] = 1;
+          q.push(nb);
+        }
+      }
+    }
+    return seen.reduce((a, b) => a + b, 0) === n;
+  };
+  for (const seed of seeds)
+    for (const [w, h] of sizes) {
+      const on = mkSize(seed, w, h, true);
+      for (const e of anchorEdges(on)) {
+        const [i, j] = e.split(",").map(Number);
+        if (!edgeCrossesBelt(on, i, j)) continue;
+        // A crossing edge is only acceptable if it's a cut-edge (gateway): removing it MUST
+        // disconnect the graph. Otherwise the re-bridge kept an avoidable crossing.
+        assert.ok(
+          !connectedWithout(on, i, j),
+          `avoidable crossing edge ${i}-${j} survived (graph still connected without it) — re-bridge not belt-aware [seed ${seed} ${w}×${h}]`,
+        );
+      }
+    }
+});
+
+// Committed connectivity + leaf-edge invariant across many specials-on worlds (multi-seed ×
+// multi-size). Encodes the stress test as a real, bounded test (~36 worlds).
+test("belt worlds: graph connected, every leaf keeps exactly its parent edge, id===index", () => {
+  const sizes = [
+    [1100, 1100],
+    [1700, 1700],
+    [2400, 2400],
+  ];
+  const seeds = [
+    4, 19, 63, 128, 256, 512, 1000, 4096, 31337, 555555, 7777777, 88888888,
+  ];
+  for (const seed of seeds)
+    for (const [w, h] of sizes) {
+      const wd = mkSize(seed, w, h, true);
+      const tag = `seed ${seed} ${w}×${h}`;
+      assert.ok(
+        wd.asteroids.every((a, i) => a.id === i),
+        `id===index broke (${tag})`,
+      );
+      assert.ok(wd.belts.length >= 1, `belt placed (${tag})`);
+      // BFS over NON-leaf bodies only reaches every non-leaf (leaves hang off their anchor).
+      assert.ok(isConnected(wd), `graph not connected (${tag})`);
+      for (const a of wd.asteroids) {
+        if (isLeaf(a)) {
+          const parent = a.moon ? a.orbitParent : a.binaryPartner;
+          assert.deepEqual(
+            a.neighbors,
+            [parent],
+            `leaf ${a.id} must have EXACTLY its parent edge (${tag})`,
+          );
+        }
+      }
+    }
+});
+
 test("a ship transiting through a belt covers less ground than with no belt", () => {
   // Same controlled straight-line transit as the nebula test, but with a belt straddling the
   // path; composes with the existing slow machinery.
