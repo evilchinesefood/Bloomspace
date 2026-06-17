@@ -721,34 +721,49 @@ export function createAsteroidView(scene, world, camCtl, fx) {
     selRing.visible = false;
   }
 
-  // processDeaths — once per frame: find bodies that JUST became dead and do the one-shot hide.
-  // For an asteroid, zero-scale its rock-mesh instance; for a planet/star/blackhole, hide its
-  // stored mesh + halo. Always hide the owner rim (zero-scale its instance). Spawn an explosion
-  // burst (fx, if provided) at the body, then rebuild the neighbor network so its edges vanish.
+  // hideBody — the SHARED one-shot hide for a dead body, used by BOTH the in-play death path
+  // (processDeaths) and the restore-time path (hideAlreadyDead) so the two can't drift ("fine in
+  // a fresh game, wrong on resume"). Marks deadSeen, hides the stored mesh+halo (planet/star/
+  // blackhole), zero-scales the rock-mesh instance (asteroid) and the owner rim, and seeds
+  // lastOwner so a later update() pass never reads -99. Returns true if a rock-mesh instance was
+  // touched (caller flushes instanceMatrix). Deliberately does NOT spawn the explosion or clear
+  // selection — those are in-play-only effects that processDeaths layers on around this call.
+  function hideBody(i) {
+    deadSeen[i] = 1;
+    if (bodyMesh[i]) bodyMesh[i].visible = false;
+    if (bodyHalo[i]) bodyHalo[i].visible = false;
+    let rockDirty = false;
+    if (rockLi[i] >= 0) {
+      dummy.position.set(0, 0, -2);
+      dummy.scale.set(0, 0, 0);
+      dummy.updateMatrix();
+      rockMesh.setMatrixAt(rockLi[i], dummy.matrix);
+      rockDirty = true;
+    }
+    // Hide the owner rim by zero-scaling its instance (off-screen + no area).
+    dummy.position.set(0, 0, -1.9);
+    dummy.scale.set(0, 0, 0);
+    dummy.updateMatrix();
+    rims.setMatrixAt(i, dummy.matrix);
+    lastOwner[i] = rocks[i].owner;
+    return rockDirty;
+  }
+
+  // processDeaths — once per frame: find bodies that JUST became dead and do the one-shot hide
+  // (shared hideBody) PLUS the in-play-only effects: spawn an explosion burst (fx, if provided)
+  // tinted by the body's last owner, clear selection if it was selected, then rebuild the
+  // neighbor network so the dead body's edges vanish.
   function processDeaths() {
     let netDirty = false;
     let rockDirty = false;
     for (let i = 0; i < n; i++) {
       if (!rocks[i].dead || deadSeen[i]) continue;
-      deadSeen[i] = 1;
       const a = rocks[i];
-      if (bodyMesh[i]) bodyMesh[i].visible = false;
-      if (bodyHalo[i]) bodyHalo[i].visible = false;
-      if (rockLi[i] >= 0) {
-        dummy.position.set(0, 0, -2);
-        dummy.scale.set(0, 0, 0);
-        dummy.updateMatrix();
-        rockMesh.setMatrixAt(rockLi[i], dummy.matrix);
-        rockDirty = true;
-      }
-      // Hide the owner rim by zero-scaling its instance (off-screen + no area).
-      dummy.position.set(0, 0, -1.9);
-      dummy.scale.set(0, 0, 0);
-      dummy.updateMatrix();
-      rims.setMatrixAt(i, dummy.matrix);
+      // Capture the explosion tint BEFORE hideBody reseeds lastOwner to the (now-neutral) owner.
+      const tint = ownerColorHex(lastOwner[i]);
+      if (hideBody(i)) rockDirty = true;
       if (selectedId === i) clearSelected();
-      if (fx && fx.spawnExplosion)
-        fx.spawnExplosion(a.x, a.y, ownerColorHex(lastOwner[i]));
+      if (fx && fx.spawnExplosion) fx.spawnExplosion(a.x, a.y, tint);
       netDirty = true;
     }
     if (rockDirty) rockMesh.instanceMatrix.needsUpdate = true;
@@ -989,33 +1004,16 @@ export function createAsteroidView(scene, world, camCtl, fx) {
 
   // Restored-world handling: a save can hold bodies that ALREADY died before saving (e.g. a
   // battery fired pre-save). They were built above as live instances; here, at construction, we
-  // hide them and mark deadSeen so processDeaths treats them as already-handled — NO spurious
-  // explosion fires on resume (processDeaths only explodes a NEW dead transition it hasn't seen).
-  // For a fresh match this loop finds nothing (no body is dead at t0). The neighbor network was
-  // already built excluding dead bodies (buildEdgePairs skips them), so only the body/rim/halo
-  // instances need hiding here.
+  // hide them (shared hideBody) and mark deadSeen so processDeaths treats them as already-handled
+  // — NO spurious explosion fires on resume (processDeaths only explodes a NEW dead transition,
+  // and hideBody itself never explodes). For a fresh match this loop finds nothing (no body is
+  // dead at t0). The neighbor network was already built excluding dead bodies (buildEdgePairs
+  // skips them), so only the body/rim/halo instances need hiding here.
   function hideAlreadyDead() {
     let rockDirty = false;
     for (let i = 0; i < n; i++) {
       if (!rocks[i].dead || deadSeen[i]) continue;
-      deadSeen[i] = 1;
-      if (bodyMesh[i]) bodyMesh[i].visible = false;
-      if (bodyHalo[i]) bodyHalo[i].visible = false;
-      if (rockLi[i] >= 0) {
-        dummy.position.set(0, 0, -2);
-        dummy.scale.set(0, 0, 0);
-        dummy.updateMatrix();
-        rockMesh.setMatrixAt(rockLi[i], dummy.matrix);
-        rockDirty = true;
-      }
-      // Hide the owner rim by zero-scaling its instance (matches processDeaths' hide).
-      dummy.position.set(0, 0, -1.9);
-      dummy.scale.set(0, 0, 0);
-      dummy.updateMatrix();
-      rims.setMatrixAt(i, dummy.matrix);
-      // Seed lastOwner so this dead body's first update() pass doesn't read -99 and try to
-      // recolor a hidden rim (update() skips dead bodies anyway, but keep state consistent).
-      lastOwner[i] = rocks[i].owner;
+      if (hideBody(i)) rockDirty = true;
     }
     if (rockDirty) rockMesh.instanceMatrix.needsUpdate = true;
     rims.instanceMatrix.needsUpdate = true;

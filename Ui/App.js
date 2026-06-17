@@ -39,6 +39,9 @@ export function createApp(root) {
   // --- Autosave: persist the live match to localStorage so a closed/refreshed tab can Resume.
   // Driven two ways: a timer (accumulated off the per-frame tick) and a tab-hide listener. The
   // listener is registered per match and removed on teardown so matches don't stack handlers.
+  // The 15s timer serializes the FULL world on the main thread (synchronous serialize +
+  // JSON.stringify in writeSave). At map sizes here that's a small, bounded cost we accept at
+  // this cadence — deliberately not offloaded to a worker / not incremental.
   const AUTOSAVE_EVERY = 15; // seconds of real time between timer autosaves
   let autosaveAcc = 0; // accumulates real (wall-clock) seconds while PLAYING
   let lastTickMs = 0; // wall-clock stamp of the previous tick(), for the accumulator

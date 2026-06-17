@@ -38,6 +38,8 @@ export function hasSave() {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return false;
     const o = JSON.parse(raw);
+    // "playing" is intentionally coupled to WORLD_STATUS.PLAYING (a known touch-point if that
+    // enum changes) — safe here because the SAVE_VERSION gate above rejects any older schema.
     return o && o.version === SAVE_VERSION && o.status === "playing";
   } catch {
     return false;
