@@ -987,6 +987,41 @@ export function createAsteroidView(scene, world, camCtl, fx) {
     rallyFlags.instanceMatrix.needsUpdate = true;
   }
 
+  // Restored-world handling: a save can hold bodies that ALREADY died before saving (e.g. a
+  // battery fired pre-save). They were built above as live instances; here, at construction, we
+  // hide them and mark deadSeen so processDeaths treats them as already-handled — NO spurious
+  // explosion fires on resume (processDeaths only explodes a NEW dead transition it hasn't seen).
+  // For a fresh match this loop finds nothing (no body is dead at t0). The neighbor network was
+  // already built excluding dead bodies (buildEdgePairs skips them), so only the body/rim/halo
+  // instances need hiding here.
+  function hideAlreadyDead() {
+    let rockDirty = false;
+    for (let i = 0; i < n; i++) {
+      if (!rocks[i].dead || deadSeen[i]) continue;
+      deadSeen[i] = 1;
+      if (bodyMesh[i]) bodyMesh[i].visible = false;
+      if (bodyHalo[i]) bodyHalo[i].visible = false;
+      if (rockLi[i] >= 0) {
+        dummy.position.set(0, 0, -2);
+        dummy.scale.set(0, 0, 0);
+        dummy.updateMatrix();
+        rockMesh.setMatrixAt(rockLi[i], dummy.matrix);
+        rockDirty = true;
+      }
+      // Hide the owner rim by zero-scaling its instance (matches processDeaths' hide).
+      dummy.position.set(0, 0, -1.9);
+      dummy.scale.set(0, 0, 0);
+      dummy.updateMatrix();
+      rims.setMatrixAt(i, dummy.matrix);
+      // Seed lastOwner so this dead body's first update() pass doesn't read -99 and try to
+      // recolor a hidden rim (update() skips dead bodies anyway, but keep state consistent).
+      lastOwner[i] = rocks[i].owner;
+    }
+    if (rockDirty) rockMesh.instanceMatrix.needsUpdate = true;
+    rims.instanceMatrix.needsUpdate = true;
+  }
+  hideAlreadyDead();
+
   update();
 
   return {

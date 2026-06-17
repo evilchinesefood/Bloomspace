@@ -115,8 +115,9 @@ function startStarfield(canvas) {
   };
 }
 
-// Start menu: title + Start + GitHub link, over a scrolling starfield. onNew() starts a match.
-export function showStartMenu(root, { onNew }) {
+// Start menu: title + (Resume) + Start + GitHub link, over a scrolling starfield. onNew() starts
+// a fresh match; onResume() (shown only when `hasSave` is true) restores the in-progress match.
+export function showStartMenu(root, { onNew, onResume, hasSave = false }) {
   const wrap = overlay("background:#05070f;backdrop-filter:none;");
   const sky = el("canvas", {
     style: "position:absolute;inset:0;width:100%;height:100%;display:block;",
@@ -141,11 +142,29 @@ export function showStartMenu(root, { onNew }) {
       textContent: "Colonize the field. Grow. Conquer every asteroid.",
     }),
   );
+  // Resume (only when an in-progress save exists): the primary brand action, above Start. Start
+  // then drops to a neutral variant so Resume reads as the headline choice. No save → only Start.
+  if (hasSave && onResume) {
+    const resume = el("wa-button", {
+      variant: "brand",
+      size: "large",
+      style: "width:100%;margin-bottom:.6rem;",
+      html: '<i slot="start" class="fa-solid fa-rotate-left"></i>Resume',
+    });
+    resume.addEventListener("click", () => {
+      cleanup();
+      onResume();
+    });
+    card.append(resume);
+  }
+
   const start = el("wa-button", {
-    variant: "brand",
+    variant: hasSave && onResume ? "neutral" : "brand",
     size: "large",
     style: "width:100%;",
-    html: '<i slot="start" class="fa-solid fa-play"></i>Start',
+    html:
+      '<i slot="start" class="fa-solid fa-play"></i>' +
+      (hasSave && onResume ? "New Game" : "Start"),
   });
   start.addEventListener("click", () => {
     cleanup();

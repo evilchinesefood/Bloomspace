@@ -7,6 +7,7 @@ import { createGame } from "../Game.js";
 import { createHud } from "./Hud.js";
 import { showStartMenu, showSkirmishSetup, showGameOver } from "./Menus.js";
 import { WORLD_STATUS } from "../Sim/World.js";
+import { writeSave, readSave, hasSave, clearSave } from "./Persist.js";
 
 export const APP_STATE = {
   MENU: "menu",
@@ -34,6 +35,23 @@ export function createApp(root) {
   let paused = false;
   let closeOverlay = null; // teardown for the current full-screen overlay
   let gameOverShown = false;
+
+  // --- Autosave: persist the live match to localStorage so a closed/refreshed tab can Resume.
+  // Driven two ways: a timer (accumulated off the per-frame tick) and a tab-hide listener. The
+  // listener is registered per match and removed on teardown so matches don't stack handlers.
+  const AUTOSAVE_EVERY = 15; // seconds of real time between timer autosaves
+  let autosaveAcc = 0; // accumulates real (wall-clock) seconds while PLAYING
+  let lastTickMs = 0; // wall-clock stamp of the previous tick(), for the accumulator
+  let visibilityHandler = null; // the active visibilitychange listener (or null)
+
+  // Save the live world IF a resumable match is in progress (PLAYING, not terminal). Used by both
+  // the timer and the tab-hide handler. A paused match still autosaves — pausing shouldn't lose
+  // progress — but a terminal world never gets written (toGameOver clears the save instead).
+  function autosaveNow() {
+    if (state !== APP_STATE.PLAYING || !game) return;
+    if (game.world.status !== WORLD_STATUS.PLAYING) return;
+    writeSave(game.world);
+  }
 
   // Persisted quality settings (survive New Game AND reloads). Reduced-motion sets the bloom
   // DEFAULT (off when the user prefers reduced motion), but any saved choice still wins.
@@ -77,6 +95,12 @@ export function createApp(root) {
     }
   }
   function tearDownMatch() {
+    // Drop the per-match tab-hide autosave listener so matches don't stack handlers (leak).
+    if (visibilityHandler) {
+      document.removeEventListener("visibilitychange", visibilityHandler);
+      visibilityHandler = null;
+    }
+    autosaveAcc = 0;
     if (hud) {
       hud.destroy();
       hud = null;
@@ -97,7 +121,13 @@ export function createApp(root) {
     tearDownMatch();
     state = APP_STATE.MENU;
     gameOverShown = false;
-    closeOverlay = showStartMenu(root, { onNew: toSetup });
+    // Offer Resume only when a usable in-progress save exists (cheap probe). resumeMatch does
+    // the full readSave + null-guard, so a save that turns out corrupt at click time falls back.
+    closeOverlay = showStartMenu(root, {
+      onNew: toSetup,
+      onResume: resumeMatch,
+      hasSave: hasSave(),
+    });
   }
 
   function toSetup() {
@@ -109,16 +139,51 @@ export function createApp(root) {
     });
   }
 
+  // startMatch — a FRESH skirmish from the setup config. Clears any stale resumable save first
+  // (so Resume always reflects an in-progress match, never a previous one), generates the world,
+  // then hands off to beginPlaying for the shared HUD/listener/PLAYING setup.
   function startMatch(config) {
     clearOverlay();
     tearDownMatch();
+    clearSave(); // a brand-new game invalidates any prior resumable save
     canvas = freshCanvas();
     game = createGame(canvas, config);
     if (game.resize) game.resize(); // fit the freshly-sized world to the viewport
+    beginPlaying();
+    autosaveNow(); // seed the save immediately so Resume reflects THIS match from the first frame
+  }
+
+  // resumeMatch — restore an in-progress match from localStorage. Mirrors startMatch but adopts
+  // a pre-deserialized world instead of generating one (so its baked specials/graph/mid-game
+  // state continue). A null read (missing/corrupt/wrong-version) falls back: stay on the menu.
+  function resumeMatch() {
+    const world = readSave();
+    if (!world) return; // corrupt/unreadable — don't tear down the menu, just ignore
+    clearOverlay();
+    tearDownMatch();
+    canvas = freshCanvas();
+    game = createGame(canvas, {}, world); // 3rd arg = restored world; skips world generation
+    if (game.resize) game.resize(); // fit the restored world to the viewport
+    beginPlaying();
+  }
+
+  // beginPlaying — shared PLAYING setup for both fresh + resumed matches: reapply quality, reset
+  // speed/pause, build the HUD, register the tab-hide autosave listener, enter PLAYING. The
+  // `game` + `canvas` are already created by the caller.
+  function beginPlaying() {
     applyQuality(); // reapply session quality settings to the new match
     speed = 1;
     paused = false;
     gameOverShown = false;
+    autosaveAcc = 0;
+    lastTickMs = 0;
+
+    // Tab-hide autosave: persist the moment the tab is backgrounded/closed (best chance to catch
+    // a real close). Removed on teardown (tearDownMatch) so it never leaks across matches.
+    visibilityHandler = () => {
+      if (document.visibilityState === "hidden") autosaveNow();
+    };
+    document.addEventListener("visibilitychange", visibilityHandler);
 
     hud = createHud(root, {
       getWorld: () => (game ? game.world : null),
@@ -178,6 +243,7 @@ export function createApp(root) {
     gameOverShown = true;
     state = APP_STATE.GAMEOVER;
     paused = true; // freeze the sim behind the overlay
+    clearSave(); // a finished match is not resumable — drop the save so the menu offers no Resume
     closeOverlay = showGameOver(root, status, { onNewGame: toMenu });
   }
 
@@ -195,7 +261,10 @@ export function createApp(root) {
   function render(alpha) {
     if (game) game.render(alpha);
   }
-  // tick — per-frame UI bookkeeping: refresh HUD + detect terminal status.
+  // tick — per-frame UI bookkeeping: refresh HUD + detect terminal status + drive the autosave
+  // timer. The timer runs on WALL-CLOCK time (not sim time) so it fires even at 1× and is
+  // independent of speed/pause; it only autosaves while genuinely PLAYING (autosaveNow guards
+  // status). The terminal check runs first so a just-finished match clears (not re-saves).
   function tick() {
     if (state === APP_STATE.PLAYING && game) {
       if (hud) hud.update();
@@ -204,8 +273,22 @@ export function createApp(root) {
         st === WORLD_STATUS.WON ||
         st === WORLD_STATUS.LOST ||
         st === WORLD_STATUS.DRAW
-      )
+      ) {
         toGameOver(st);
+        return;
+      }
+      // Wall-clock autosave accumulator. lastTickMs=0 means "first tick of the match" — seed it
+      // without banking a huge dt (avoids an immediate save on resume from a long-paused tab).
+      const now =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (lastTickMs) {
+        autosaveAcc += (now - lastTickMs) / 1000;
+        if (autosaveAcc >= AUTOSAVE_EVERY) {
+          autosaveAcc = 0;
+          autosaveNow();
+        }
+      }
+      lastTickMs = now;
     }
   }
 

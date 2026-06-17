@@ -55,8 +55,13 @@ const DEFAULT_CONFIG = {
   ],
 };
 
-export function createGame(canvas, config = {}) {
-  const world = createWorld({ ...DEFAULT_CONFIG, ...config });
+// createGame(canvas, config, restoredWorld?) — wires a match. A FRESH match passes config and
+// generates a world. A RESUMED match passes an already-deserialized `restoredWorld` (from
+// Ui/Persist.readSave): we skip createWorld and adopt it verbatim so its baked-in specials /
+// graph / mid-game state continue deterministically (no re-generation). Everything downstream
+// (scene/views/input) reads the live world the same way for both paths.
+export function createGame(canvas, config = {}, restoredWorld = null) {
+  const world = restoredWorld || createWorld({ ...DEFAULT_CONFIG, ...config });
 
   const scene = createScene(canvas, world);
   // Views take the scene controller so SeedlingView/AsteroidView can read live zoom +
