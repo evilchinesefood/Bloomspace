@@ -78,19 +78,6 @@ function send() {
   return out;
 }
 
-// arrive/colonize — a soft two-note "claim" chime (perfect fifth, gentle).
-function colonize() {
-  const dur = 0.36,
-    out = alloc(dur);
-  for (let i = 0; i < out.length; i++) {
-    const t = i / SR;
-    const a = Math.sin(TAU * 660 * t);
-    const b = Math.sin(TAU * 990 * t) * 0.7;
-    out[i] = (a + b) * decayEnv(t, dur, 0.006) * 0.35;
-  }
-  return out;
-}
-
 // capture — a brighter, more decisive claim chime (major third stack).
 function capture() {
   const dur = 0.38,
@@ -119,20 +106,6 @@ function death() {
     lp += (noise - lp) * (0.35 - p * 0.28); // darkening
     const tone = Math.sin(TAU * (160 - 80 * p) * t) * 0.4;
     out[i] = (lp * 0.6 + tone) * decayEnv(t, dur) * 0.6;
-  }
-  return out;
-}
-
-// combat — a tiny dry "tick" (reserved name; short click + blip).
-function combat() {
-  const dur = 0.12,
-    out = alloc(dur),
-    rand = rng(3);
-  for (let i = 0; i < out.length; i++) {
-    const t = i / SR;
-    const click = (rand() * 2 - 1) * Math.exp(-t / 0.01);
-    const blip = Math.sin(TAU * 1200 * t) * Math.exp(-t / 0.04);
-    out[i] = (click * 0.5 + blip * 0.4) * 0.6;
   }
   return out;
 }
@@ -261,10 +234,8 @@ function ambientShimmer() {
 
 const FILES = {
   "Send.wav": send,
-  "Colonize.wav": colonize,
   "Capture.wav": capture,
   "Death.wav": death,
-  "Combat.wav": combat,
   "Plant.wav": plant,
   "Fire.wav": fire,
   "Win.wav": win,

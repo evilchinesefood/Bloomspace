@@ -11,10 +11,8 @@ import { baseUrl } from "./Menus.js";
 // name → file under Audio/. SFX are short one-shots; the two ambient clips loop as music.
 const SFX_FILES = {
   send: "Send.wav",
-  colonize: "Colonize.wav",
   capture: "Capture.wav",
   death: "Death.wav",
-  combat: "Combat.wav",
   plant: "Plant.wav",
   fire: "Fire.wav", // reserved (bombardment) — buffer ready, no emitter yet
   win: "Win.wav",
@@ -27,7 +25,7 @@ const MUSIC_FILES = ["AmbientDeep.wav", "AmbientShimmer.wav"];
 const MAX_PER_FRAME = 3;
 const MIN_INTERVAL = 0.05; // seconds between two plays of the SAME sound
 
-export function createSound(opts = {}) {
+export function createSound() {
   let ctx = null;
   let sfxGain = null;
   let musicGain = null;
@@ -35,8 +33,11 @@ export function createSound(opts = {}) {
   const musicBuffers = []; // decoded ambient loops
   let musicSource = null; // current looping BufferSource (null when stopped)
 
-  let sfxEnabled = opts.sfx !== false;
-  let musicEnabled = opts.music !== false;
+  // Default ENABLED; App.applyQuality() synchronously applies the real saved state (sfx/music)
+  // via setSfxEnabled/setMusicEnabled right after construction — before any async gesture or
+  // playback — mirroring how bloom/seedlingCap are applied (NOT via constructor config).
+  let sfxEnabled = true;
+  let musicEnabled = true;
   let resumed = false; // has a user gesture unlocked the context?
   let preloadPromise = null; // cached decode-all promise (so resume() can await it)
 

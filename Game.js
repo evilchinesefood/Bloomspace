@@ -67,8 +67,9 @@ export function createGame(canvas, config = {}) {
   const fx = createFx(scene.scene, world);
   const picking = createPicking(scene.scene, scene.camera, canvas, world);
   // Non-authoritative audio: starts suspended, unlocks on first user gesture, consumes the
-  // same event channel the FX drain reads. Owns no game truth.
-  const sound = createSound(config.audio || {});
+  // same event channel the FX drain reads. Owns no game truth. Defaults enabled; the real
+  // saved sfx/music state is applied by App.applyQuality() right after construction.
+  const sound = createSound();
   const views = { asteroids, seedlings, trees, fx };
 
   // Send-fraction lives here so Input (drag release) and the HUD slider share one source.
