@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createWorld, spawnSeedling, STATE, OWNER_NEUTRAL } from "./World.js";
+import {
+  createWorld,
+  spawnSeedling,
+  STATE,
+  OWNER_NEUTRAL,
+  EVENT,
+} from "./World.js";
 import { resolveCombat, CONTACT_RADIUS, HOLD_GAP } from "./Combat.js";
 import Sim from "./World.js";
 
@@ -252,4 +258,82 @@ test("full step(): opposing clusters near a rock fight to a flip without index c
   }
   assert.ok(flipped, "attackers should eventually take the rock");
   assert.equal(aliveCount(w, 1), 0, "defenders wiped");
+});
+
+// --- A1: LOST event tests ---------------------------------------------------
+
+function countEvt(w, type) {
+  let n = 0;
+  for (let i = 0; i < w.events.n; i++) if (w.events.type[i] === type) n++;
+  return n;
+}
+
+test("flip: enemy capturing a player-0 rock pushes EVENT.LOST with owner 0", () => {
+  const w = bareWorld(2);
+  const rock = w.asteroids[0];
+  rock.owner = 0; // player 0 owns it
+  w.seed.count = 0;
+  // single enemy (owner 1) in hold-zone, no defenders
+  put(w, rock.x + rock.radius + HOLD_GAP - 5, rock.y, 1, 50, 100);
+  w.events.n = 0;
+  resolveCombat(w, 1 / 30);
+  assert.equal(rock.owner, 1, "rock flips to enemy");
+  assert.equal(countEvt(w, EVENT.LOST), 1, "one LOST event emitted");
+  // verify LOST owner is 0 (the previous owner)
+  let foundOwner = -1;
+  for (let i = 0; i < w.events.n; i++)
+    if (w.events.type[i] === EVENT.LOST) foundOwner = w.events.owner[i];
+  assert.equal(
+    foundOwner,
+    0,
+    "LOST event owner is the player who lost the rock",
+  );
+});
+
+test("flip: player 0 capturing an enemy rock pushes CAPTURE(owner=0), NO LOST", () => {
+  const w = bareWorld(2);
+  const rock = w.asteroids[0];
+  rock.owner = 1; // enemy owns it
+  w.seed.count = 0;
+  put(w, rock.x + rock.radius + HOLD_GAP - 5, rock.y, 0, 50, 100);
+  w.events.n = 0;
+  resolveCombat(w, 1 / 30);
+  assert.equal(rock.owner, 0, "rock flips to player 0");
+  assert.equal(countEvt(w, EVENT.CAPTURE), 1, "one CAPTURE event");
+  assert.equal(
+    countEvt(w, EVENT.LOST),
+    0,
+    "no LOST event when player gains a rock",
+  );
+});
+
+test("flip: player 0 capturing a neutral rock (colonization path) pushes NO LOST", () => {
+  // neutral rocks skip flipOwnership (guarded at top), so no LOST emitted
+  const w = bareWorld(2);
+  const rock = w.asteroids[0];
+  rock.owner = OWNER_NEUTRAL;
+  w.seed.count = 0;
+  put(w, rock.x + rock.radius + HOLD_GAP - 5, rock.y, 0, 50, 100);
+  w.events.n = 0;
+  resolveCombat(w, 1 / 30);
+  // neutral rocks are skipped by flipOwnership, owner stays neutral
+  assert.equal(
+    rock.owner,
+    OWNER_NEUTRAL,
+    "neutral rock stays neutral via combat",
+  );
+  assert.equal(countEvt(w, EVENT.LOST), 0, "no LOST for neutral rock");
+});
+
+test("flip: enemy-vs-enemy (neither is player 0) pushes NO LOST", () => {
+  const w = bareWorld(2);
+  const rock = w.asteroids[0];
+  rock.owner = 2; // AI owner 2 holds it
+  w.seed.count = 0;
+  // enemy owner 1 captures from owner 2 — neither is player 0
+  put(w, rock.x + rock.radius + HOLD_GAP - 5, rock.y, 1, 50, 100);
+  w.events.n = 0;
+  resolveCombat(w, 1 / 30);
+  assert.equal(rock.owner, 1, "rock flips between AIs");
+  assert.equal(countEvt(w, EVENT.LOST), 0, "no LOST event for AI-vs-AI flip");
 });

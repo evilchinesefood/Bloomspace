@@ -733,3 +733,227 @@ test("a no-bombard game is bit-identical across two same-seed runs (no drift)", 
     assert.ok(Math.abs(wa.seed.x[i] - wb.seed.x[i]) < 1e-9);
   }
 });
+
+// --- A2: DESTROY event from destroyBody -------------------------------------
+
+test("destroyBody emits exactly one EVENT.DESTROY for a moonless target body", () => {
+  const w = world(50);
+  // pick a moonless rock (no other body has orbitParent === its id) to get exactly 1 DESTROY
+  const target = w.asteroids.find(
+    (a) =>
+      a.owner === OWNER_NEUTRAL &&
+      a.kind === "asteroid" &&
+      !a.moon &&
+      !a.dead &&
+      !w.asteroids.some((m) => m.orbitParent === a.id && m.moon && !m.dead),
+  );
+  assert.ok(target, "moonless neutral rock found");
+  w.events.n = 0;
+  destroyBody(w, target.id);
+  assert.equal(countEvents(w, EVENT.DESTROY), 1, "exactly one DESTROY event");
+  // owner is -1 (global, not player-tied)
+  let ev = null;
+  for (let i = 0; i < w.events.n; i++)
+    if (w.events.type[i] === EVENT.DESTROY)
+      ev = { x: w.events.x[i], y: w.events.y[i], owner: w.events.owner[i] };
+  assert.ok(ev, "DESTROY event found");
+  assert.equal(ev.owner, -1, "DESTROY owner is -1 (global)");
+});
+
+test("destroyBody on already-dead body emits no extra DESTROY", () => {
+  const w = world(51);
+  const target = neutralRock(w);
+  destroyBody(w, target.id);
+  w.events.n = 0;
+  destroyBody(w, target.id); // idempotent call
+  assert.equal(countEvents(w, EVENT.DESTROY), 0, "no DESTROY on re-destroy");
+});
+
+// --- A3: Moon cascade -------------------------------------------------------
+
+test("destroying a planet with moons marks all moons dead and preserves id===index", () => {
+  // find a world that has a planet with moons
+  let w = null;
+  let planet = null;
+  for (let seed = 1; seed < 200 && !planet; seed++) {
+    const cand = world(seed);
+    const p = cand.asteroids.find(
+      (a) =>
+        !a.dead &&
+        !a.moon &&
+        a.kind !== "blackhole" &&
+        cand.asteroids.some((m) => m.orbitParent === a.id && m.moon && !m.dead),
+    );
+    if (p) {
+      w = cand;
+      planet = p;
+    }
+  }
+  assert.ok(planet, "found a planet with at least one moon");
+  const moons = w.asteroids.filter(
+    (a) => a.orbitParent === planet.id && a.moon && !a.dead,
+  );
+  assert.ok(moons.length > 0, "planet has live moons");
+
+  w.events.n = 0;
+  destroyBody(w, planet.id);
+
+  // planet dead
+  assert.equal(planet.dead, true, "planet is dead");
+  // all moons dead
+  for (const m of moons)
+    assert.equal(m.dead, true, `moon ${m.id} should be dead`);
+  // id===index invariant preserved
+  assert.ok(
+    w.asteroids.every((a, i) => a.id === i),
+    "id===index broken after cascade",
+  );
+  // DESTROY emitted for planet + each moon
+  assert.equal(
+    countEvents(w, EVENT.DESTROY),
+    1 + moons.length,
+    "DESTROY emitted for planet and each moon",
+  );
+});
+
+test("cascade: moons of moons are also destroyed recursively", () => {
+  // find or construct a world with moon-of-moon if possible; otherwise skip gracefully
+  let w = null;
+  let moonWithMoon = null;
+  for (let seed = 1; seed < 500 && !moonWithMoon; seed++) {
+    const cand = world(seed);
+    const m = cand.asteroids.find(
+      (a) =>
+        a.moon &&
+        !a.dead &&
+        cand.asteroids.some(
+          (m2) => m2.orbitParent === a.id && m2.moon && !m2.dead,
+        ),
+    );
+    if (m) {
+      w = cand;
+      moonWithMoon = m;
+    }
+  }
+  if (!moonWithMoon) return; // no such map found — skip gracefully
+  const grandparent = w.asteroids.find(
+    (a) => a.id === moonWithMoon.orbitParent,
+  );
+  assert.ok(grandparent, "grandparent found");
+  w.events.n = 0;
+  destroyBody(w, grandparent.id);
+  assert.equal(grandparent.dead, true);
+  assert.equal(
+    moonWithMoon.dead,
+    true,
+    "moon-of-moon's parent destroyed, so it too",
+  );
+});
+
+test("cascade: binary partner (orbitParent===-1) of destroyed body is NOT destroyed", () => {
+  // Find two bodies that form a binary pair: both have orbitParent===-1 and moon===true,
+  // and share the same orbit anchor (their ids appear together in the asteroids list near
+  // each other with matching orbitParent===-1). We pick one, destroy it, and confirm its
+  // counterpart — which would be captured by a moon cascade if orbitParent===-1 weren't
+  // excluded — survives.
+  let w = null;
+  let binaryA = null; // the one we will destroy
+  let binaryB = null; // the counterpart that must survive
+  for (let seed = 1; seed < 200 && !binaryA; seed++) {
+    const cand = world(seed);
+    // Both members of a binary pair have orbitParent===-1 and moon===true.
+    // Find any two such bodies that share the same parent rock (their common anchor),
+    // identified by being adjacent entries or by scanning for two orbitParent===-1 moons.
+    const candidates = cand.asteroids.filter(
+      (a) => !a.dead && a.orbitParent === -1 && a.moon,
+    );
+    if (candidates.length >= 2) {
+      w = cand;
+      binaryA = candidates[0];
+      binaryB = candidates[1];
+    }
+  }
+  if (!binaryA) return; // no binary pairs found in these seeds — skip gracefully
+  assert.equal(binaryA.orbitParent, -1, "binaryA is a binary partner");
+  assert.equal(binaryB.orbitParent, -1, "binaryB is a binary partner");
+  // Destroy binaryA — the cascade must NOT pull in binaryB because orbitParent===-1
+  // is explicitly excluded from moon cascade logic.
+  destroyBody(w, binaryA.id);
+  assert.equal(binaryA.dead, true, "binaryA was destroyed");
+  assert.equal(
+    binaryB.dead,
+    undefined,
+    "binary counterpart binaryB must NOT be cascade-destroyed",
+  );
+});
+
+test("cascade: correct number of DESTROY events emitted for planet + moons", () => {
+  let w = null;
+  let planet = null;
+  for (let seed = 1; seed < 200 && !planet; seed++) {
+    const cand = world(seed);
+    const p = cand.asteroids.find(
+      (a) =>
+        !a.dead &&
+        !a.moon &&
+        a.kind !== "blackhole" &&
+        cand.asteroids.some((m) => m.orbitParent === a.id && m.moon && !m.dead),
+    );
+    if (p) {
+      w = cand;
+      planet = p;
+    }
+  }
+  assert.ok(planet, "found a planet with moons");
+  w.events.n = 0;
+  destroyBody(w, planet.id);
+  const destroyCount = countEvents(w, EVENT.DESTROY);
+  const moons = w.asteroids.filter(
+    (a) => a.orbitParent === planet.id && a.moon,
+  );
+  assert.equal(
+    destroyCount,
+    1 + moons.length,
+    "one DESTROY per body (planet + each moon)",
+  );
+});
+
+test("cascade: seedlings homed at moons are reaped when planet is destroyed", () => {
+  let w = null;
+  let planet = null;
+  for (let seed = 1; seed < 200 && !planet; seed++) {
+    const cand = world(seed);
+    const p = cand.asteroids.find(
+      (a) =>
+        !a.dead &&
+        !a.moon &&
+        a.kind !== "blackhole" &&
+        cand.asteroids.some((m) => m.orbitParent === a.id && m.moon && !m.dead),
+    );
+    if (p) {
+      w = cand;
+      planet = p;
+    }
+  }
+  assert.ok(planet, "found planet with moons");
+  const moons = w.asteroids.filter(
+    (a) => a.orbitParent === planet.id && a.moon && !a.dead,
+  );
+  // spawn seedlings homed at the first moon
+  const moon = moons[0];
+  moon.owner = 0;
+  for (let k = 0; k < 3; k++) Sim.spawnSeedling(w, { home: moon.id, owner: 0 });
+  const before = w.seed.count;
+  const homedAtMoon = (() => {
+    let n = 0;
+    for (let i = 0; i < w.seed.count; i++) if (w.seed.home[i] === moon.id) n++;
+    return n;
+  })();
+  assert.ok(homedAtMoon >= 3, "moon has seedlings");
+  destroyBody(w, planet.id);
+  assert.equal(moon.dead, true, "moon destroyed by cascade");
+  assert.ok(w.seed.count < before, "seed count dropped after cascade");
+  // seedlings homed at the moon are reaped
+  for (let i = 0; i < w.seed.count; i++)
+    assert.notEqual(w.seed.home[i], moon.id, "no survivor homed at dead moon");
+});

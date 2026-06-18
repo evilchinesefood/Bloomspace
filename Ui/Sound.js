@@ -14,9 +14,11 @@ const SFX_FILES = {
   capture: "Capture.wav",
   death: "Death.wav",
   plant: "Plant.wav",
-  fire: "Fire.wav", // bombardment — emitted by Sim/Bombard.js, played in Game.js render()
+  fire: "Fire.wav", // bombardment battery fire-start
   win: "Win.wav",
   lose: "Lose.wav",
+  alert: "Alert.wav", // player lost a rock to an enemy
+  explosion: "Explosion.wav", // celestial body destroyed by bombardment
 };
 const MUSIC_FILES = ["AmbientDeep.wav", "AmbientShimmer.wav"];
 

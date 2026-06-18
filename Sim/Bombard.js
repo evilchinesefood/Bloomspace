@@ -94,10 +94,10 @@ export function updateBombard(world, dt) {
 }
 
 // destroyBody — the dead-body operation. Mark a body dead IN PLACE (no splice), sever it from
-// the travel graph, rebuild nav, and reap every seedling tied to it. Idempotent: a no-op on an
-// already-dead or missing body. Invalidates the black-hole cache so a destroyed hole stops
-// reaping. Emits no special "destroyed" event — the seedling deaths emit DEATH, and FIRE was
-// emitted at fire-start; Render detects the dead transition itself in a later pass.
+// the travel graph, rebuild nav, reap every seedling tied to it, emit EVENT.DESTROY, and
+// recursively destroy any moons orbiting it (ascending id order for determinism).
+// Idempotent: a no-op on an already-dead or missing body. Invalidates the black-hole cache.
+// Binary partners (orbitParent === -1) are untouched — only true moons (orbitParent === id).
 export function destroyBody(world, id) {
   const body = world.asteroids[id];
   if (!body || body.dead) return;
@@ -132,6 +132,17 @@ export function destroyBody(world, id) {
 
   // A destroyed black hole must stop reaping ships — force the memo to recompute next tick.
   if (body.kind === "blackhole") world._blackholes = null;
+
+  // Emit destruction event (global, owner -1 — visual + audio, not player-tied).
+  pushEvent(world, EVENT.DESTROY, body.x, body.y, -1);
+
+  // Cascade: destroy all live moons orbiting this body (ascending id, snapshot first).
+  const moonIds = [];
+  for (let i = 0; i < asts.length; i++) {
+    const a = asts[i];
+    if (a.orbitParent === id && a.moon && !a.dead) moonIds.push(i);
+  }
+  for (let k = 0; k < moonIds.length; k++) destroyBody(world, moonIds[k]);
 }
 
 export default {

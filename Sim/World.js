@@ -41,6 +41,8 @@ export const EVENT = {
   FIRE: 3,
   WIN: 4,
   LOSE: 5,
+  LOST: 6, // player 0 lost a rock to an enemy (distinct alert cue)
+  DESTROY: 7, // a celestial body was destroyed by bombardment
 };
 
 // pushEvent — append one event to world.events (allocation-free). Silently drops when full,

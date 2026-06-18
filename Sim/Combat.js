@@ -245,8 +245,11 @@ function flipOwnership(world) {
     }
     if (ownerPresent) continue;
     if (rival >= 0) {
+      const prev = rock.owner;
       rock.owner = rival; // exactly one rival side, defenders gone → flip
       pushEvent(world, EVENT.CAPTURE, rock.x, rock.y, rival);
+      if (prev === 0 && rival !== 0)
+        pushEvent(world, EVENT.LOST, rock.x, rock.y, 0);
       rock.rally = -1; // a captured rock drops the old owner's rally anchor
     }
   }

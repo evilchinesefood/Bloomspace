@@ -125,17 +125,24 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
     let puffs = 0;
     for (let k = 0; k < ev.n; k++) {
       const type = ev.type[k];
+      const own = ev.owner[k];
       if (type === EVENT.DEATH) {
         if (puffs < DEATH_PUFF_MAX) {
-          fx.spawnDeath(ev.x[k], ev.y[k]);
+          fx.spawnDeath(ev.x[k], ev.y[k]); // unconditional — show puff for any battle
           puffs++;
         }
-        sound.play("death");
-      } else if (type === EVENT.SEND) sound.play("send");
-      else if (type === EVENT.CAPTURE) sound.play("capture");
-      else if (type === EVENT.WIN) sound.play("win");
+        if (own === 0) sound.play("death"); // only player-0 deaths get the SFX
+      } else if (type === EVENT.SEND) {
+        if (own === 0) sound.play("send");
+      } else if (type === EVENT.CAPTURE) {
+        if (own === 0) sound.play("capture");
+      } else if (type === EVENT.WIN) sound.play("win");
       else if (type === EVENT.LOSE) sound.play("lose");
-      else if (type === EVENT.FIRE) sound.play("fire"); // bombardment battery fire-start
+      else if (type === EVENT.FIRE) {
+        if (own === 0) sound.play("fire"); // bombardment battery fire-start
+      } else if (type === EVENT.LOST)
+        sound.play("alert"); // always; owner is 0 — guarded at emit site in Combat.flipOwnership
+      else if (type === EVENT.DESTROY) sound.play("explosion"); // body destroyed
     }
     ev.n = 0;
     sound.endFrame(); // reset per-frame SFX throttle counters

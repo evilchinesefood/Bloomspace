@@ -29,6 +29,8 @@ const SHELL = [
   "Audio/Fire.wav",
   "Audio/Win.wav",
   "Audio/Lose.wav",
+  "Audio/Alert.wav",
+  "Audio/Explosion.wav",
   "Audio/AmbientDeep.wav",
   "Audio/AmbientShimmer.wav",
   "Sim/World.js",
