@@ -48,6 +48,9 @@ export function createTreeView(scene, world) {
     for (const a of world.asteroids) {
       const trees = a.trees;
       if (!trees || trees.length === 0) continue;
+      // Fog: trees are live intel — show them only on bodies the human currently sees (own rocks
+      // are always seen, so your own trees always show; enemy/neutral trees hide when out of vision).
+      if (world.fogOn && world.fog && !world.fog.seen[0][a.id]) continue;
       const total = trees.length;
       for (let t = 0; t < total; t++) {
         const tree = trees[t];

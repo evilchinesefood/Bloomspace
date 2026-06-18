@@ -123,12 +123,31 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
     // cleared here so a paused frame (no steps) re-spawns nothing.
     const ev = world.events;
     let puffs = 0;
+    // Fog: suppress combat death-puffs at locations the human can't currently see, so a hidden
+    // enemy fight doesn't betray itself. Nearest live rock's visibility is the proxy.
+    const fogHidden = (x, y) => {
+      if (!world.fogOn || !world.fog) return false;
+      const aa = world.asteroids;
+      let best = -1,
+        bd = Infinity;
+      for (let i = 0; i < aa.length; i++) {
+        if (aa[i].dead) continue;
+        const dx = aa[i].x - x,
+          dy = aa[i].y - y,
+          d = dx * dx + dy * dy;
+        if (d < bd) {
+          bd = d;
+          best = i;
+        }
+      }
+      return best >= 0 && !world.fog.seen[0][best];
+    };
     for (let k = 0; k < ev.n; k++) {
       const type = ev.type[k];
       const own = ev.owner[k];
       if (type === EVENT.DEATH) {
-        if (puffs < DEATH_PUFF_MAX) {
-          fx.spawnDeath(ev.x[k], ev.y[k]); // unconditional — show puff for any battle
+        if (puffs < DEATH_PUFF_MAX && !fogHidden(ev.x[k], ev.y[k])) {
+          fx.spawnDeath(ev.x[k], ev.y[k]); // puff only for battles the player can currently see
           puffs++;
         }
         if (own === 0) sound.play("death"); // only player-0 deaths get the SFX

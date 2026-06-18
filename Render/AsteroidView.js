@@ -23,7 +23,8 @@ function fogState(world, r) {
 function fogOwner(world, r, trueOwner) {
   if (!world.fogOn || !world.fog) return trueOwner;
   if (world.fog.seen[FOG_HUMAN][r]) return trueOwner;
-  return world.fog.known[FOG_HUMAN][r];
+  const k = world.fog.known[FOG_HUMAN][r];
+  return k < 0 ? -1 : k; // never-seen / unknown → neutral-colored rim (body stays visible)
 }
 
 // Small seeded PRNG so each planet's look is unique but stable.
@@ -923,7 +924,7 @@ export function createAsteroidView(scene, world, camCtl, fx) {
       const fs = world.fogOn ? fogState(world, i) : 2;
       if (o !== lastOwner[i] || fs !== lastFog[i]) {
         ownerColor(col, o);
-        if (fs === 1) col.multiplyScalar(0.45);
+        if (fs !== 2) col.multiplyScalar(0.45); // out-of-vision rim dimmed (body itself stays full)
         rims.setColorAt(i, col);
         lastOwner[i] = o;
         lastFog[i] = fs;
@@ -983,7 +984,7 @@ export function createAsteroidView(scene, world, camCtl, fx) {
     for (let k = 0; k < metN; k++) {
       const bi = metBody[k];
       const a = rocks[bi];
-      if (a.dead || (world.fogOn && fogState(world, bi) === 0)) {
+      if (a.dead) {
         dummy.position.set(0, 0, 0);
         dummy.scale.set(0, 0, 0);
         dummy.updateMatrix();
@@ -1111,8 +1112,11 @@ export function createAsteroidView(scene, world, camCtl, fx) {
       // moving-body pass rewrites each frame — its mask must follow). Static unchanged rocks: skip.
       if (fs === fogApplied[i] && !(fs !== 0 && a.orbiting)) continue;
       fogApplied[i] = fs;
-      const visible = fs !== 0;
-      const dim = fs === 1;
+      // Fog of war shows TERRAIN always — the body (asteroid/planet/star) stays fully visible at
+      // every fog state. Only the live intel (ships, trees, glow, contest, particles) hides, and
+      // the rim shows the last-known owner (dimmed when out of vision, set in the rim loop above).
+      const visible = true;
+      const dim = false;
       // Planet / star / blackhole meshes: toggle visibility + dim the remembered ones.
       const bm = bodyMesh[i];
       if (bm) {

@@ -529,6 +529,12 @@ export function createHud(root, api) {
       "margin-bottom:.8rem;font:600 .82rem system-ui;display:flex;gap:1rem;",
     textContent: "",
   });
+  // Shown INSTEAD of the live stats/counts when the selected body is out of the human's vision.
+  const fogNote = el("div", {
+    style:
+      "margin:.2rem 0 .8rem;font:600 .82rem system-ui;color:#9fb0d0;opacity:.9;",
+    textContent: "Out of vision — only the last-known owner is shown.",
+  });
 
   // Upgrade panel — three compact buttons, one per stat. Created once, shown only for own rocks.
   const upgLabel = el("div", {
@@ -608,7 +614,9 @@ export function createHud(root, api) {
     size: "small",
     variant: "danger",
     style: "width:100%;margin-bottom:.4rem;",
-    html: '<i slot="start" class="fa-solid fa-crosshairs"></i>FIRE',
+    title:
+      "Fire the armed bombard battery: click, then pick an enemy rock to destroy it.",
+    html: '<i slot="start" class="fa-solid fa-crosshairs"></i>Fire battery',
   });
   fireBtn.addEventListener("click", () =>
     api.setFireMode(!(api.isFireMode && api.isFireMode())),
@@ -619,6 +627,8 @@ export function createHud(root, api) {
   const rallyBtn = el("wa-button", {
     size: "small",
     style: "width:100%;margin-bottom:.4rem;",
+    title:
+      "Set a rally point: click, then pick a target body. New seedlings born here auto-travel there. Click this rock again to clear it.",
     html: '<i slot="start" class="fa-solid fa-location-crosshairs"></i>Set Rally Point',
   });
   rallyBtn.addEventListener("click", () =>
@@ -630,6 +640,8 @@ export function createHud(root, api) {
   const connectBtn = el("wa-button", {
     size: "small",
     style: "width:100%;margin-bottom:.4rem;",
+    title:
+      "Build a permanent travel link to another body you own: click, then pick it. Costs energy from this rock.",
     html: '<i slot="start" class="fa-solid fa-link"></i>Build Connection',
   });
   connectBtn.addEventListener("click", () =>
@@ -641,7 +653,9 @@ export function createHud(root, api) {
   const inboundBtn = el("wa-button", {
     size: "small",
     style: "width:100%;margin-bottom:.4rem;",
-    html: '<i slot="start" class="fa-solid fa-arrow-right-to-bracket"></i>Show rallies to here',
+    title:
+      "Show which other bodies have set their rally point TO this rock (also toggled with the 'i' key).",
+    html: '<i slot="start" class="fa-solid fa-arrow-right-to-bracket"></i>Inbound rallies',
   });
   inboundBtn.addEventListener("click", () => api.toggleInbound());
 
@@ -659,6 +673,7 @@ export function createHud(root, api) {
     energyEl,
     treesEl,
     orbitEl,
+    fogNote,
     upgLabel,
     upgRow,
     sendSlider,
@@ -683,10 +698,32 @@ export function createHud(root, api) {
     const a = world.asteroids[id];
     panel.style.display = "block";
     titleEl.textContent = `Asteroid #${id}`;
-    const ownerName =
-      a.owner === HUMAN ? "You" : a.owner < 0 ? "Neutral" : `AI ${a.owner}`;
+    // Fog: a body the human can't currently SEE stays clickable but exposes NO live intel — only
+    // its last-known owner. (Own rocks are always seen, so this only affects enemy/neutral bodies.)
+    const fogged =
+      world.fogOn &&
+      world.fog &&
+      world.fog.seen[HUMAN] &&
+      !world.fog.seen[HUMAN][id];
+    let ownerId, ownerName;
+    if (fogged) {
+      const k = world.fog.known[HUMAN][id];
+      ownerId = k < 0 ? -1 : k;
+      ownerName =
+        k >= 0
+          ? k === HUMAN
+            ? "You"
+            : `AI ${k}`
+          : k === -1
+            ? "Neutral"
+            : "Unknown";
+    } else {
+      ownerId = a.owner;
+      ownerName =
+        a.owner === HUMAN ? "You" : a.owner < 0 ? "Neutral" : `AI ${a.owner}`;
+    }
     ownerEl.textContent = ownerName;
-    ownerEl.style.color = hex(ownerColorHex(a.owner));
+    ownerEl.style.color = hex(ownerColorHex(ownerId));
     eBar.set(a.energyStat);
     sBar.set(a.strengthStat);
     spBar.set(a.speedStat);
@@ -715,6 +752,18 @@ export function createHud(root, api) {
           : ""),
     );
 
+    // Out-of-vision body: hide ALL live intel (stat bars, stored energy, trees, ship counts) and
+    // show the fog note instead. The body stays on the map + clickable; you just get no readout.
+    const showIntel = !fogged;
+    eBar.row.style.display = showIntel ? "" : "none";
+    sBar.row.style.display = showIntel ? "" : "none";
+    spBar.row.style.display = showIntel ? "" : "none";
+    energyEl.style.display = showIntel ? "" : "none";
+    treesEl.style.display = showIntel ? "" : "none";
+    orbitEl.style.display = showIntel ? "" : "none";
+    fogNote.style.display = fogged ? "" : "none";
+    inboundBtn.style.display = fogged ? "none" : ""; // no controls on an out-of-vision body
+
     const owned = a.owner === HUMAN;
 
     // Upgrade panel: shown only for owned rocks; update button labels + disabled state.
@@ -723,27 +772,36 @@ export function createHud(root, api) {
     if (owned) {
       const seeds = playerSeeds(world, HUMAN);
       const upgBtns = [
-        [upgEnergyBtn, UPGRADE.ENERGY, "#ffd24b", "Energy"],
-        [upgStrBtn, UPGRADE.STRENGTH, "#ff6b6b", "Strength"],
-        [upgSpdBtn, UPGRADE.SPEED, "#5ad1ff", "Speed"],
+        [
+          upgEnergyBtn,
+          UPGRADE.ENERGY,
+          "#ffd24b",
+          "Energy",
+          "faster energy regen",
+        ],
+        [
+          upgStrBtn,
+          UPGRADE.STRENGTH,
+          "#ff6b6b",
+          "Strength",
+          "stronger seedlings",
+        ],
+        [upgSpdBtn, UPGRADE.SPEED, "#5ad1ff", "Speed", "faster seedlings"],
       ];
-      for (const [btn, stat, color, label] of upgBtns) {
+      for (const [btn, stat, color, label, effect] of upgBtns) {
         const tier = upgradeTier(a, stat);
         const maxed = tier >= UPG_MAX_TIER;
         const cost = upgradeCost(tier);
         const afford = !maxed && seeds >= cost;
         setProp(btn, "disabled", maxed || !afford);
+        // Label = just the stat (what it upgrades); cost + effect live in the hover tooltip.
         setHtml(
           btn,
-          maxed
-            ? `<span style="color:${color}">${label} MAX</span>`
-            : `<span style="color:${color}">${label} ▲${cost}</span>`,
+          `<span style="color:${color}">${label}${maxed ? " ✓" : ""}</span>`,
         );
         btn.title = maxed
-          ? `${label} fully upgraded (${UPG_MAX_TIER}/${UPG_MAX_TIER})`
-          : afford
-            ? `Upgrade ${label} for ${cost} seeds (tier ${tier + 1}/${UPG_MAX_TIER})`
-            : `Need ${cost} seeds to upgrade ${label}`;
+          ? `${label} fully upgraded (${UPG_MAX_TIER}/${UPG_MAX_TIER}) — ${effect}.`
+          : `Upgrade ${label} for ${cost} seeds → tier ${tier + 1}/${UPG_MAX_TIER} (${effect})${afford ? "" : " — not enough seeds"}.`;
       }
     }
 
@@ -763,11 +821,11 @@ export function createHud(root, api) {
         seeds >= TREE_SEED_COST && a.energy >= TREE_ENERGY_COST;
       setProp(plantSeedBtn, "disabled", !affordable);
       setProp(plantDefBtn, "disabled", !affordable);
-      const why = affordable
-        ? `Costs ${TREE_SEED_COST} seeds + ${TREE_ENERGY_COST} energy`
-        : `Need ${TREE_SEED_COST} seeds + ${TREE_ENERGY_COST} energy`;
-      plantSeedBtn.title = why;
-      plantDefBtn.title = why;
+      const costTxt = affordable
+        ? `Costs ${TREE_SEED_COST} seeds + ${TREE_ENERGY_COST} energy.`
+        : `Need ${TREE_SEED_COST} seeds + ${TREE_ENERGY_COST} energy.`;
+      plantSeedBtn.title = `Plant a seedling tree — grows fighters that orbit this rock and can be sent to attack or defend. ${costTxt}`;
+      plantDefBtn.title = `Plant a defense tree — spawns defenders that guard this rock (more mature defense trees → more defenders). ${costTxt}`;
 
       // --- Bombard battery: plant button (count N/5 + escalating cost), status, FIRE button ---
       const bcount = countBombard(a);
@@ -776,17 +834,17 @@ export function createHud(root, api) {
       const bEnergyCost = bfull ? 0 : BOMBARD_ENERGY_COST[bcount];
       const bAfford = !bfull && seeds >= bSeedCost && a.energy >= bEnergyCost;
       setProp(plantBombBtn, "disabled", bfull || !bAfford);
+      // Label = the action only; the N/5 count is on the status line below and the cost is in
+      // the tooltip — keeps the button to one line.
       setHtml(
         plantBombBtn,
         bfull
-          ? `<i slot="start" class="fa-solid fa-meteor"></i>Battery full (${BATTERY_SIZE}/${BATTERY_SIZE})`
-          : `<i slot="start" class="fa-solid fa-meteor"></i>Plant Bombard Tree ${bcount}/${BATTERY_SIZE} (${bSeedCost} seeds ${bEnergyCost} energy)`,
+          ? `<i slot="start" class="fa-solid fa-meteor"></i>Battery full`
+          : `<i slot="start" class="fa-solid fa-meteor"></i>Plant Bombard Tree`,
       );
       plantBombBtn.title = bfull
-        ? "Battery is full — 5 bombard trees planted"
-        : bAfford
-          ? `Plant bombard tree ${bcount + 1}/${BATTERY_SIZE} for ${bSeedCost} seeds + ${bEnergyCost} energy`
-          : `Need ${bSeedCost} seeds + ${bEnergyCost} energy`;
+        ? `Battery full — ${BATTERY_SIZE} bombard trees planted and ready to fire.`
+        : `Plant bombard tree ${bcount + 1}/${BATTERY_SIZE} for ${bSeedCost} seeds + ${bEnergyCost} energy. ${BATTERY_SIZE} mature trees arm a battery that destroys an enemy rock.${bAfford ? "" : " (Not enough resources.)"}`;
 
       const mature = matureBombardCount(a);
       const armed = isArmed(a);
