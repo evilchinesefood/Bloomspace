@@ -638,3 +638,43 @@ test("scatter: default (no layout) matches golden seed=42", () => {
     assert.equal(w.asteroids[i].y, GOLDEN_S1[i].y, `body ${i} y`);
   }
 });
+
+test("config.startTree: each spawn home gets one mature seedling tree (opt-in)", () => {
+  const cfg = (startTree) => ({
+    seed: 5,
+    asteroidCount: 20,
+    planetMin: 1,
+    planetMax: 2,
+    startTree,
+    players: [
+      { id: 0, isAi: false, difficulty: 0 },
+      { id: 1, isAi: true, difficulty: 1 },
+    ],
+  });
+  // ON (real matches): every player's home owns exactly one MATURE seedling tree.
+  const on = createWorld(cfg(true));
+  for (const p of on.players) {
+    const home = on.asteroids.find((a) => a.owner === p.id);
+    const seedlings = home.trees.filter((t) => t.type === "seedling");
+    assert.equal(
+      seedlings.length,
+      1,
+      `home of player ${p.id} has one seedling tree`,
+    );
+    assert.equal(
+      seedlings[0].growth,
+      1,
+      "the starting tree is mature (produces from t=0)",
+    );
+  }
+  // OFF (default — tutorial + unit tests): homes start pristine.
+  const off = createWorld(cfg(false));
+  for (const p of off.players) {
+    const home = off.asteroids.find((a) => a.owner === p.id);
+    assert.equal(
+      home.trees.length,
+      0,
+      `home of player ${p.id} is tree-free by default`,
+    );
+  }
+});

@@ -422,6 +422,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
       layout,
       aiPersonality,
       specials: true, // terrain specials (rich rocks + nebulae) on for every started match
+      startTree: true, // every spawn home starts with one mature seedling tree (produces from t=0)
       events: eventsSwitch.checked !== false, // environmental hazards (flares + meteors)
       fog: fogSwitch.checked === true, // fog of war (last-known visibility + blind AI), opt-in
       winConfig: { mode, timeLimitSecs },

@@ -66,6 +66,18 @@ function matureDefenseCount(rock) {
 }
 
 // plantTree — owner must own the rock and afford both seeds + energy. Deducts both and
+// A starting seedling tree for spawn homes — created MATURE so the home produces seedlings from
+// the start (no plant cost, no grow-in wait). Single source of truth for the seedling-tree shape.
+export function seedlingTree() {
+  return {
+    type: "seedling",
+    level: 1,
+    growth: 1,
+    cooldown: PRODUCE_INTERVAL,
+    flowerCd: FLOWER_INTERVAL,
+  };
+}
+
 // appends a fresh tree on success. Returns true; otherwise no mutation and returns false.
 export function plantTree(world, asteroidId, type, owner) {
   const rock = world.asteroids[asteroidId];

@@ -13,6 +13,7 @@
 // Orbit model (generalized): a body with `orbiting` moves each tick around either another body
 // (`orbitParent >= 0`) or a fixed point (`orbitCx/orbitCy`, used by binaries). See Sim/Moons.js.
 import { OWNER_NEUTRAL } from "./World.js";
+import { seedlingTree } from "./Trees.js";
 
 const MIN_RADIUS = 18;
 const MAX_RADIUS = 40;
@@ -748,6 +749,10 @@ export function generateMap(world, config = {}, spawnSeedling) {
     const owner = players[p].id;
     a.owner = owner;
     a.energy = HOME_ENERGY;
+    // Real matches (the menu sets config.startTree) give every spawn home one mature seedling tree
+    // so you produce from the start. Opt-in: the tutorial (which teaches planting) and the unit
+    // tests don't set it, so they get pristine homes.
+    if (config.startTree) (a.trees || (a.trees = [])).push(seedlingTree());
     for (let k = 0; k < HOME_SEEDLINGS; k++) {
       spawnSeedling(world, {
         home: a.id,
