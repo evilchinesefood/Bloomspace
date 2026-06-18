@@ -7,6 +7,7 @@ import * as THREE from "three";
 import { ownerColor, ownerColorHex } from "./Palette.js";
 import { lodActive } from "./SeedlingView.js";
 import { CHARGE_TICKS } from "../Sim/Bombard.js";
+import { STATE, MAX_PLAYERS } from "../Sim/World.js";
 
 // Small seeded PRNG so each planet's look is unique but stable.
 function rngFrom(seed) {
@@ -717,6 +718,34 @@ export function createAsteroidView(scene, world, camCtl, fx) {
   const batCol = new THREE.Color();
   let clock = 0; // seconds, advanced each frame for the pulse
 
+  // --- Contest overlay: split bar above each contested rock showing each owner's share of
+  //     present strength. Up to 2 segment instances per rock (top-2 owners). ---
+  const OWN = Math.max(1, MAX_PLAYERS);
+  const contestStr = new Float32Array(n * OWN); // [rock*OWN + owner] -> strength sum
+  const hasCombat = new Uint8Array(n); // 1 if any STATE.COMBAT seedling present this frame
+  const contCap = Math.max(1, 2 * n);
+  const contest = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0.82,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      vertexColors: true,
+    }),
+    contCap,
+  );
+  contest.instanceColor = new THREE.InstancedBufferAttribute(
+    new Float32Array(contCap * 3),
+    3,
+  );
+  contest.frustumCulled = false;
+  contest.count = 0;
+  contest.position.z = -1.7;
+  scene.add(contest);
+  const contCol = new THREE.Color();
+
   // --- Charge beams: an additive/bloom laser from each charging battery to its target, growing
   //     as the charge resolves. One LineSegments rebuilt per frame from the charging set. ---
   const beamGeo = new THREE.BufferGeometry();
@@ -855,6 +884,7 @@ export function createAsteroidView(scene, world, camCtl, fx) {
     }
 
     updateGlow();
+    updateContest();
     updateRally();
     updateBattery();
     updateBeams();
@@ -958,10 +988,20 @@ export function createAsteroidView(scene, world, camCtl, fx) {
       return;
     }
     orbitCount.fill(0);
+    contestStr.fill(0);
+    hasCombat.fill(0);
     const s = world.seed;
     for (let i = 0; i < s.count; i++) {
       const h = s.home[i];
-      if (h >= 0 && h < n) orbitCount[h]++;
+      if (h >= 0 && h < n) {
+        orbitCount[h]++;
+        const st = s.state[i];
+        if (st !== STATE.TRANSIT && st !== STATE.SLING) {
+          const o = s.owner[i];
+          if (o >= 0 && o < OWN) contestStr[h * OWN + o] += s.strength[i];
+          if (st === STATE.COMBAT) hasCombat[h] = 1;
+        }
+      }
     }
     for (let i = 0; i < n; i++) {
       const a = rocks[i];
@@ -985,6 +1025,71 @@ export function createAsteroidView(scene, world, camCtl, fx) {
     glow.count = n;
     glow.instanceMatrix.needsUpdate = true;
     if (glow.instanceColor) glow.instanceColor.needsUpdate = true;
+  }
+
+  // updateContest — split bar above each contested rock (≥2 owners have present strength).
+  // Draws up to 2 segment instances per rock: the top-2 owners by strength, side-by-side,
+  // widths proportional to share. Strength is pre-accumulated by updateGlow's seedling scan.
+  function updateContest() {
+    if (!lodActive(camCtl)) {
+      contest.count = 0;
+      return;
+    }
+    const BAR_H = 4;
+    const BAR_GAP = 8; // gap above rock edge
+    let m = 0;
+    for (let i = 0; i < n; i++) {
+      const a = rocks[i];
+      if (a.dead) continue;
+      const base = i * OWN;
+      // Find top-2 owners by strength.
+      let o0 = -1,
+        s0 = 0,
+        o1 = -1,
+        s1 = 0;
+      for (let o = 0; o < OWN; o++) {
+        const v = contestStr[base + o];
+        if (v > s0) {
+          o1 = o0;
+          s1 = s0;
+          o0 = o;
+          s0 = v;
+        } else if (v > s1) {
+          o1 = o;
+          s1 = v;
+        }
+      }
+      if (o0 < 0 || o1 < 0) continue; // fewer than 2 owners present — not contested
+      const total = s0 + s1;
+      if (total <= 0) continue;
+      const barW = a.radius * 1.4;
+      const cy = a.y + a.radius + BAR_GAP;
+      const pulse = hasCombat[i] ? 0.75 + 0.25 * Math.sin(clock * 7) : 1;
+      // Segment 0: leader (o0), left half proportional to share.
+      const w0 = barW * (s0 / total);
+      const w1 = barW * (s1 / total);
+      const x0 = a.x - barW / 2 + w0 / 2;
+      const x1 = a.x - barW / 2 + w0 + w1 / 2;
+      dummy.position.set(x0, cy, 0);
+      dummy.scale.set(w0, BAR_H, 1);
+      dummy.updateMatrix();
+      contest.setMatrixAt(m, dummy.matrix);
+      contCol.setHex(ownerColorHex(o0)).multiplyScalar(pulse);
+      contest.setColorAt(m, contCol);
+      m++;
+      dummy.position.set(x1, cy, 0);
+      dummy.scale.set(w1, BAR_H, 1);
+      dummy.updateMatrix();
+      contest.setMatrixAt(m, dummy.matrix);
+      contCol.setHex(ownerColorHex(o1)).multiplyScalar(pulse);
+      contest.setColorAt(m, contCol);
+      m++;
+    }
+    contest.count = m;
+    if (m > 0) {
+      contest.instanceMatrix.needsUpdate = true;
+      if (contest.instanceColor) contest.instanceColor.needsUpdate = true;
+    }
   }
 
   function updateRally() {
