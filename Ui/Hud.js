@@ -17,6 +17,12 @@ import {
 import { CONNECT_ENERGY_COST } from "../Sim/MapGen.js";
 import { KIND } from "../Sim/World.js";
 import { TECH, MAX_TIER, techCost } from "../Sim/Tech.js";
+import {
+  UPGRADE,
+  MAX_TIER as UPG_MAX_TIER,
+  upgradeCost,
+  upgradeTier,
+} from "../Sim/Upgrade.js";
 
 const hex = (n) => "#" + (n >>> 0).toString(16).padStart(6, "0").slice(-6);
 
@@ -524,6 +530,33 @@ export function createHud(root, api) {
     textContent: "",
   });
 
+  // Upgrade panel — three compact buttons, one per stat. Created once, shown only for own rocks.
+  const upgLabel = el("div", {
+    style:
+      "font:600 .78rem system-ui;opacity:.75;margin:.5rem 0 .25rem;letter-spacing:.04em;",
+    textContent: "UPGRADE ASTEROID",
+  });
+  const mkUpgBtn = (stat, color) => {
+    const btn = el("wa-button", {
+      size: "small",
+      style: `flex:1;min-width:0;`,
+    });
+    btn.addEventListener("click", () => api.onUpgrade(stat));
+    btn._upgStat = stat;
+    btn._upgColor = color;
+    return btn;
+  };
+  const upgEnergyBtn = mkUpgBtn(UPGRADE.ENERGY, "#ffd24b");
+  const upgStrBtn = mkUpgBtn(UPGRADE.STRENGTH, "#ff6b6b");
+  const upgSpdBtn = mkUpgBtn(UPGRADE.SPEED, "#5ad1ff");
+  const upgRow = el(
+    "div",
+    {
+      style: "display:flex;gap:.3rem;margin-bottom:.6rem;",
+    },
+    [upgEnergyBtn, upgStrBtn, upgSpdBtn],
+  );
+
   // Send-fraction slider — the single source of how many seedlings a send dispatches.
   const sendSlider = el("wa-slider", {
     label: "Send amount",
@@ -627,6 +660,8 @@ export function createHud(root, api) {
     energyEl,
     treesEl,
     orbitEl,
+    upgLabel,
+    upgRow,
     sendSlider,
     plantSeedBtn,
     plantDefBtn,
@@ -682,6 +717,37 @@ export function createHud(root, api) {
     );
 
     const owned = a.owner === HUMAN;
+
+    // Upgrade panel: shown only for owned rocks; update button labels + disabled state.
+    upgLabel.style.display = owned ? "" : "none";
+    upgRow.style.display = owned ? "" : "none";
+    if (owned) {
+      const seeds = playerSeeds(world, HUMAN);
+      const upgBtns = [
+        [upgEnergyBtn, UPGRADE.ENERGY, "#ffd24b", "Energy"],
+        [upgStrBtn, UPGRADE.STRENGTH, "#ff6b6b", "Strength"],
+        [upgSpdBtn, UPGRADE.SPEED, "#5ad1ff", "Speed"],
+      ];
+      for (const [btn, stat, color, label] of upgBtns) {
+        const tier = upgradeTier(a, stat);
+        const maxed = tier >= UPG_MAX_TIER;
+        const cost = upgradeCost(tier);
+        const afford = !maxed && seeds >= cost;
+        setProp(btn, "disabled", maxed || !afford);
+        setHtml(
+          btn,
+          maxed
+            ? `<span style="color:${color}">${label} MAX</span>`
+            : `<span style="color:${color}">${label} ▲${cost}🌱</span>`,
+        );
+        btn.title = maxed
+          ? `${label} fully upgraded (${UPG_MAX_TIER}/${UPG_MAX_TIER})`
+          : afford
+            ? `Upgrade ${label} for ${cost} seeds (tier ${tier + 1}/${UPG_MAX_TIER})`
+            : `Need ${cost} seeds to upgrade ${label}`;
+      }
+    }
+
     // Only your own rocks expose send/plant/rally; others are info-only.
     sendSlider.style.display = owned ? "" : "none";
     plantSeedBtn.style.display = owned ? "" : "none";

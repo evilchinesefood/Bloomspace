@@ -235,6 +235,12 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
       if (ok) sound.play("plant");
       return ok;
     },
+    // Upgrade wrapper: routes the HUD's per-rock stat upgrade through Input (player 0).
+    upgrade: (stat) => {
+      const ok = input.upgrade(stat);
+      if (ok) sound.play("plant");
+      return ok;
+    },
     // Read-only flags surfaced for the headless verify harness (reduced-motion + bloom state).
     sceneReducedMotion: scene.reducedMotion,
     get bloomEnabled() {

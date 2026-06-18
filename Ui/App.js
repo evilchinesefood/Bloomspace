@@ -242,6 +242,7 @@ export function createApp(root) {
       getSendFraction: () => (game ? game.getSendFraction() : 0.5),
       setSendFraction: (f) => game && game.setSendFraction(f),
       onPlant: (type) => game && game.plant(type),
+      onUpgrade: (stat) => (game ? game.upgrade(stat) : false),
       onBuyTech: (track) => (game ? game.buyTech(track) : false),
       getSelected: () => (game ? game.input.selectedId() : -1),
       setRallyMode: (on) => game && game.input.setRallyMode(on),

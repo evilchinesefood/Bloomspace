@@ -10,6 +10,7 @@ import { tryConnect } from "../Sim/MapGen.js";
 import { plantTree } from "../Sim/Trees.js";
 import { fireBombard, isArmed } from "../Sim/Bombard.js";
 import { buyTech } from "../Sim/Tech.js";
+import { buyUpgrade } from "../Sim/Upgrade.js";
 import { ownerColorHex } from "../Render/Palette.js";
 import { WORLD_STATUS } from "../Sim/World.js";
 
@@ -229,6 +230,14 @@ export function createInput({
     return buyTech(world, HUMAN, track);
   }
 
+  // Upgrade action for the HUD's per-rock upgrade panel. Validates inside buyUpgrade.
+  function upgrade(stat) {
+    const world = getWorld();
+    const id = selectedId();
+    if (id < 0 || !world || !world.asteroids[id]) return false;
+    return buyUpgrade(world, id, stat, HUMAN);
+  }
+
   // Escape cancels an armed rally / connect pick (the banner tells the player this is there).
   function onKey(e) {
     if (e.key === "Escape") {
@@ -256,6 +265,7 @@ export function createInput({
   return {
     plant,
     tech,
+    upgrade,
     selectedId,
     setRallyMode,
     isRallyMode,

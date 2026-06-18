@@ -42,6 +42,7 @@ const SHELL = [
   "Sim/Economy.js",
   "Sim/Trees.js",
   "Sim/Bombard.js",
+  "Sim/Upgrade.js",
   "Sim/Ai.js",
   "Sim/Save.js",
   "Render/Scene.js",
