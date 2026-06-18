@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { createWorld, spawnSeedling, STATE, OWNER_NEUTRAL } from "./World.js";
+import { createWorld, spawnSeedling, OWNER_NEUTRAL } from "./World.js";
 import { computeFog, knownOwner, UNKNOWN, VISION_R } from "./Fog.js";
 import { updateAi } from "./Ai.js";
 import { serialize, deserialize } from "./Save.js";

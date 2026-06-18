@@ -532,9 +532,8 @@ export function createHud(root, api) {
 
   // Upgrade panel — three compact buttons, one per stat. Created once, shown only for own rocks.
   const upgLabel = el("div", {
-    style:
-      "font:600 .78rem system-ui;opacity:.75;margin:.5rem 0 .25rem;letter-spacing:.04em;",
-    textContent: "UPGRADE ASTEROID",
+    style: "font:600 .78rem system-ui;opacity:.75;margin:.5rem 0 .25rem;",
+    textContent: "Upgrade rock",
   });
   const mkUpgBtn = (stat, color) => {
     const btn = el("wa-button", {
@@ -582,7 +581,7 @@ export function createHud(root, api) {
   });
   const plantDefBtn = el("wa-button", {
     size: "small",
-    style: "width:100%;",
+    style: "width:100%;margin-bottom:.4rem;",
     html: '<i slot="start" class="fa-solid fa-shield-halved"></i>Plant Defense Tree',
   });
   plantSeedBtn.addEventListener("click", () => api.onPlant("seedling"));
@@ -592,14 +591,14 @@ export function createHud(root, api) {
   // bombard trees arm the rock as a superweapon battery.
   const plantBombBtn = el("wa-button", {
     size: "small",
-    style: "width:100%;margin-top:.4rem;",
+    style: "width:100%;margin-bottom:.4rem;",
     html: '<i slot="start" class="fa-solid fa-meteor"></i>Plant Bombard Tree',
   });
   plantBombBtn.addEventListener("click", () => api.onPlant("bombard"));
 
   // Bombard battery status line (count / mature / armed / charging).
   const bombStatusEl = el("div", {
-    style: "margin-top:.5rem;font:600 .8rem system-ui;",
+    style: "margin-bottom:.4rem;font:600 .8rem system-ui;",
     textContent: "",
   });
 
@@ -608,7 +607,7 @@ export function createHud(root, api) {
   const fireBtn = el("wa-button", {
     size: "small",
     variant: "danger",
-    style: "width:100%;margin-top:.4rem;",
+    style: "width:100%;margin-bottom:.4rem;",
     html: '<i slot="start" class="fa-solid fa-crosshairs"></i>FIRE',
   });
   fireBtn.addEventListener("click", () =>
@@ -619,7 +618,7 @@ export function createHud(root, api) {
   // auto-move to that target. Clicking this rock itself (while arming) clears the rally.
   const rallyBtn = el("wa-button", {
     size: "small",
-    style: "width:100%;margin-top:.4rem;",
+    style: "width:100%;margin-bottom:.4rem;",
     html: '<i slot="start" class="fa-solid fa-location-crosshairs"></i>Set Rally Point',
   });
   rallyBtn.addEventListener("click", () =>
@@ -630,7 +629,7 @@ export function createHud(root, api) {
   // energy from this rock). Arms a one-click pick like the rally.
   const connectBtn = el("wa-button", {
     size: "small",
-    style: "width:100%;margin-top:.4rem;",
+    style: "width:100%;margin-bottom:.4rem;",
     html: '<i slot="start" class="fa-solid fa-link"></i>Build Connection',
   });
   connectBtn.addEventListener("click", () =>
@@ -641,7 +640,7 @@ export function createHud(root, api) {
   // their rally set TO the selected body, instead of this body's own outbound rally.
   const inboundBtn = el("wa-button", {
     size: "small",
-    style: "width:100%;margin-top:.4rem;",
+    style: "width:100%;margin-bottom:.4rem;",
     html: '<i slot="start" class="fa-solid fa-arrow-right-to-bracket"></i>Show rallies to here',
   });
   inboundBtn.addEventListener("click", () => api.toggleInbound());
@@ -738,7 +737,7 @@ export function createHud(root, api) {
           btn,
           maxed
             ? `<span style="color:${color}">${label} MAX</span>`
-            : `<span style="color:${color}">${label} ▲${cost}🌱</span>`,
+            : `<span style="color:${color}">${label} ▲${cost}</span>`,
         );
         btn.title = maxed
           ? `${label} fully upgraded (${UPG_MAX_TIER}/${UPG_MAX_TIER})`
@@ -781,7 +780,7 @@ export function createHud(root, api) {
         plantBombBtn,
         bfull
           ? `<i slot="start" class="fa-solid fa-meteor"></i>Battery full (${BATTERY_SIZE}/${BATTERY_SIZE})`
-          : `<i slot="start" class="fa-solid fa-meteor"></i>Plant Bombard Tree ${bcount}/${BATTERY_SIZE} (${bSeedCost}🌱 ${bEnergyCost}⚡)`,
+          : `<i slot="start" class="fa-solid fa-meteor"></i>Plant Bombard Tree ${bcount}/${BATTERY_SIZE} (${bSeedCost} seeds ${bEnergyCost} energy)`,
       );
       plantBombBtn.title = bfull
         ? "Battery is full — 5 bombard trees planted"

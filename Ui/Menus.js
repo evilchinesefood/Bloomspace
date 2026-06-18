@@ -349,15 +349,26 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
   };
   sizeSel.addEventListener("change", applySizeToSlider);
 
+  // Section header for grouping — small muted label, no spacing above first group.
+  const section = (label, top = true) =>
+    el("div", {
+      style: `font:700 .72rem system-ui;letter-spacing:.06em;opacity:.55;text-transform:uppercase;${top ? "margin:1rem 0 .35rem;" : "margin:0 0 .35rem;"}`,
+      textContent: label,
+    });
+
   dialog.append(
+    section("Map", false),
     field(sizeSel),
     field(countSlider),
     field(layoutSel),
+    section("Opponents"),
     field(aiSel),
     field(diffSel),
     field(personalitySel),
+    section("Rules"),
     field(winSel),
     field(timeSel),
+    section("Hazards"),
     field(eventsSwitch),
     field(fogSwitch),
   );
