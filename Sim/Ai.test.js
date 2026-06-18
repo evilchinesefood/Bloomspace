@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createWorld, STATE, OWNER_NEUTRAL } from "./World.js";
-import { updateAi, checkVictory, PERSONALITIES } from "./Ai.js";
+import { updateAi, checkVictory, PERSONALITIES, effBombKnobs } from "./Ai.js";
 import Sim from "./World.js";
 
 const hasNaN = (s) => {
@@ -463,4 +463,54 @@ test("personality: neutral/absent behaves exactly like pre-personality baseline"
     "neutral and undefined personality must produce identical send counts",
   );
   assert.equal(wNeutral.status, wNone.status, "world status must match");
+});
+
+// --- Bombardment is hardest-difficulty-only ---------------------------------
+
+test("bombard gate: only the hardest AI (Brutal) runs a battery program", () => {
+  // Easy/Normal/Hard get no bomb knobs (no AI bombardment) regardless of personality;
+  // only Brutal (difficulty 3) does. This keeps lower difficulties beatable.
+  for (const diff of [0, 1, 2]) {
+    assert.equal(
+      effBombKnobs({ difficulty: diff, personality: "superweapon-fiend" }),
+      null,
+      `difficulty ${diff} must not bombard, even as superweapon-fiend`,
+    );
+    assert.equal(
+      effBombKnobs({ difficulty: diff, personality: "neutral" }),
+      null,
+      `difficulty ${diff} must not bombard`,
+    );
+  }
+  const brutal = effBombKnobs({ difficulty: 3, personality: "neutral" });
+  assert.ok(brutal, "Brutal AI must still run a bombard program");
+  assert.ok(brutal.planEvery >= 1 && brutal.fireEvery >= 1);
+});
+
+test("bombard gate: a Normal superweapon-fiend AI never builds a battery in a full game", () => {
+  // End-to-end: even the bombard-happy personality at Normal difficulty, handed every rock and
+  // resources, must never plant a bombard tree (the gate is off below Brutal). Deterministic.
+  const w = createWorld({
+    seed: 4242,
+    asteroidCount: 16,
+    planetMin: 0,
+    planetMax: 1,
+    aiPersonality: "superweapon-fiend",
+    players: [
+      { id: 0, isAi: false, difficulty: 0 },
+      { id: 1, isAi: true, difficulty: 1 }, // Normal
+    ],
+  });
+  for (const a of w.asteroids) if (a.owner !== 0) a.owner = 1; // give the AI a big economy
+  for (const p of w.players) p.seeds = 9999;
+  for (let t = 0; t < 3000; t++) Sim.step(w, 1 / 30);
+  const bombardTrees = w.asteroids.reduce(
+    (n, a) => n + (a.trees || []).filter((t) => t.type === "bombard").length,
+    0,
+  );
+  assert.equal(
+    bombardTrees,
+    0,
+    "a Normal AI must never plant a bombard tree (bombardment is Brutal-only)",
+  );
 });

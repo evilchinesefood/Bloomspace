@@ -156,10 +156,17 @@ function effKnobs(player) {
   };
 }
 
+// Bombardment is a top-difficulty-only threat: ONLY the hardest AI (Brutal) runs a battery
+// program. Easy/Normal/Hard never bombard, regardless of personality (so a Normal
+// superweapon-fiend can't wipe you with batteries) — keeps lower difficulties beatable.
+const BOMBARD_MIN_DIFFICULTY = 3;
+
 // Effective BOMB_KNOBS for a player, blending difficulty base with personality.
-// Returns null for Easy (no bombard program) regardless of personality.
-function effBombKnobs(player) {
-  const base = BOMB_KNOBS[Math.max(0, Math.min(3, player.difficulty | 0))];
+// Returns null below BOMBARD_MIN_DIFFICULTY (and for Easy's null base) — no bombard program.
+export function effBombKnobs(player) {
+  const diff = Math.max(0, Math.min(3, player.difficulty | 0));
+  if (diff < BOMBARD_MIN_DIFFICULTY) return null;
+  const base = BOMB_KNOBS[diff];
   if (!base) return null;
   const pm = PERSONALITIES[player.personality] ?? PERSONALITIES.neutral;
   return {
