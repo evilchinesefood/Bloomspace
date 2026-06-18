@@ -148,20 +148,102 @@ function makeStar(world, rng) {
   );
 }
 
+// Candidate proposers — each returns {x,y,radius} via rng ONLY. The clearance/acceptance
+// loop in placeBodies is shared across all layouts (overlap rejection is layout-agnostic).
+// scatter: uniform rejection sampling across the full field (byte-identical to the original).
+function proposeScatter(width, height, radius, rng) {
+  const x = EDGE_PAD + radius + rng() * (width - 2 * (EDGE_PAD + radius));
+  const y = EDGE_PAD + radius + rng() * (height - 2 * (EDGE_PAD + radius));
+  return { x, y };
+}
+
+// loop: bodies on a ring around the centre with radial+angular jitter.
+function proposeLoop(width, height, radius, rng) {
+  const cx = width / 2;
+  const cy = height / 2;
+  const half = Math.min(cx, cy);
+  const ringR = half * (0.35 + rng() * 0.25); // 35–60% of half-extent
+  const ang = rng() * Math.PI * 2;
+  const jR = (rng() - 0.5) * half * 0.18;
+  const jA = (rng() - 0.5) * 0.4;
+  const r = ringR + jR;
+  const x = cx + Math.cos(ang + jA) * r;
+  const y = cy + Math.sin(ang + jA) * r;
+  return {
+    x: Math.max(EDGE_PAD + radius, Math.min(width - EDGE_PAD - radius, x)),
+    y: Math.max(EDGE_PAD + radius, Math.min(height - EDGE_PAD - radius, y)),
+  };
+}
+
+// linear: bodies along a full-range corridor angle drawn once before placement (shared by all
+// bodies in the map), with per-body along-lane position and perpendicular jitter.
+function proposeLinear(width, height, radius, rng, laneAng) {
+  const cx = width / 2;
+  const cy = height / 2;
+  const span = Math.min(width, height) * 0.85;
+  const t = (rng() - 0.5) * span; // along-lane position
+  const perp = (rng() - 0.5) * Math.min(width, height) * 0.28; // perpendicular jitter
+  const x = cx + Math.cos(laneAng) * t - Math.sin(laneAng) * perp;
+  const y = cy + Math.sin(laneAng) * t + Math.cos(laneAng) * perp;
+  return {
+    x: Math.max(EDGE_PAD + radius, Math.min(width - EDGE_PAD - radius, x)),
+    y: Math.max(EDGE_PAD + radius, Math.min(height - EDGE_PAD - radius, y)),
+  };
+}
+
+// hub: central cluster near the star + spoke-radial bodies further out.
+function proposeHub(width, height, radius, rng) {
+  const cx = width / 2;
+  const cy = height / 2;
+  const half = Math.min(cx, cy);
+  // ~40% of bodies close-in, rest on spokes.
+  const close = rng() < 0.4;
+  const dist_ = close
+    ? half * (0.1 + rng() * 0.2)
+    : half * (0.45 + rng() * 0.45);
+  const ang = rng() * Math.PI * 2;
+  const x = cx + Math.cos(ang) * dist_;
+  const y = cy + Math.sin(ang) * dist_;
+  return {
+    x: Math.max(EDGE_PAD + radius, Math.min(width - EDGE_PAD - radius, x)),
+    y: Math.max(EDGE_PAD + radius, Math.min(height - EDGE_PAD - radius, y)),
+  };
+}
+
 // Place `total` planets+asteroids around the pre-seeded bodies (the star), via rejection
 // sampling. Planets/stars reserve extra clearance so moon orbits never reach a neighbour.
-function placeBodies(world, total, planetCount, seeded) {
+// config.layout selects the candidate proposer; scatter is the original (byte-identical) path.
+function placeBodies(world, total, planetCount, seeded, layout) {
   const { width, height, rng } = world;
   const out = seeded.slice();
   let id = out.length;
+
+  // Resolve "random" once, via rng, at placement time.
+  const LAYOUTS = ["scatter", "loop", "linear", "hub"];
+  const eff =
+    layout === "random"
+      ? LAYOUTS[Math.floor(rng() * LAYOUTS.length)]
+      : layout || "scatter";
+
+  // linear draws its corridor angle ONCE here (gated to linear only — no extra rng for scatter).
+  const laneAng = eff === "linear" ? rng() * Math.PI : 0;
+
+  const propose = (radius) => {
+    if (eff === "loop") return proposeLoop(width, height, radius, rng);
+    if (eff === "linear")
+      return proposeLinear(width, height, radius, rng, laneAng);
+    if (eff === "hub") return proposeHub(width, height, radius, rng);
+    // scatter (default): EXACT original two rng calls, same order.
+    return proposeScatter(width, height, radius, rng);
+  };
+
   const tryPlace = (kind) => {
     const isPlanet = kind === "planet";
     for (let attempt = 0; attempt < 500; attempt++) {
       const radius = isPlanet
         ? PLANET_MIN_R + rng() * (PLANET_MAX_R - PLANET_MIN_R)
         : MIN_RADIUS + rng() * (MAX_RADIUS - MIN_RADIUS);
-      const x = EDGE_PAD + radius + rng() * (width - 2 * (EDGE_PAD + radius));
-      const y = EDGE_PAD + radius + rng() * (height - 2 * (EDGE_PAD + radius));
+      const { x, y } = propose(radius);
       const cand = { x, y, radius, kind };
       let ok = true;
       for (const a of out) {
@@ -612,7 +694,13 @@ export function generateMap(world, config = {}, spawnSeedling) {
   planetCount = Math.max(0, Math.min(planetCount, Math.floor(total / 2)));
 
   const star = makeStar(world, rng);
-  const asteroids = placeBodies(world, total, planetCount, [star]);
+  const asteroids = placeBodies(
+    world,
+    total,
+    planetCount,
+    [star],
+    config.layout,
+  );
   world.asteroids = asteroids;
   world.links = [];
 

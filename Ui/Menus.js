@@ -295,6 +295,14 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     el("wa-option", { value: "900", textContent: "15 minutes" }),
   ]);
 
+  const layoutSel = el("wa-select", { label: "Map layout" }, [
+    el("wa-option", { value: "scatter", textContent: "Classic (scattered)" }),
+    el("wa-option", { value: "loop", textContent: "Loop (ring)" }),
+    el("wa-option", { value: "linear", textContent: "Linear (corridor)" }),
+    el("wa-option", { value: "hub", textContent: "Hub (spoke clusters)" }),
+    el("wa-option", { value: "random", textContent: "Random" }),
+  ]);
+
   // Map size preset nudges the default asteroid count AND clamps the slider's max to a count
   // the chosen map can actually fit (rejection sampling caps placement far below big requests:
   // ~16 small / ~36 medium / 60 large). Keeps the request honest with no MapGen change.
@@ -310,6 +318,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
   dialog.append(
     field(sizeSel),
     field(countSlider),
+    field(layoutSel),
     field(aiSel),
     field(diffSel),
     field(winSel),
@@ -351,6 +360,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
       players.push({ id: i, isAi: true, difficulty });
     // Match seed: fresh per match — allowed ONLY in the UI layer.
     const seed = (Math.random() * 0xffffffff) >>> 0;
+    const layout = layoutSel.value || "scatter";
     if (!cleanup()) return;
     onConfirm({
       width: size.width,
@@ -360,6 +370,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
       planetMax: size.planetMax,
       players,
       seed,
+      layout,
       specials: true, // terrain specials (rich rocks + nebulae) on for every started match
       winConfig: { mode, timeLimitSecs },
     });
@@ -375,6 +386,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     diffSel.value = "1";
     winSel.value = "elimination";
     timeSel.value = "0";
+    layoutSel.value = "scatter";
     applySizeToSlider(); // clamp slider max to the (medium) default size
   };
   if (window.customElements && customElements.whenDefined) {
