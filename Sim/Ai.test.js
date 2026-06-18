@@ -1,7 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createWorld, STATE, OWNER_NEUTRAL } from "./World.js";
-import { updateAi, checkVictory, PERSONALITIES, effBombKnobs } from "./Ai.js";
+import {
+  updateAi,
+  checkVictory,
+  PERSONALITIES,
+  effBombKnobs,
+  effKnobs,
+} from "./Ai.js";
 import Sim from "./World.js";
 
 const hasNaN = (s) => {
@@ -288,36 +294,45 @@ test("ai decision timer resets with a fresh world (no leak)", () => {
 
 // --- Personality tests -------------------------------------------------------
 
-test("personality: rusher sends more fleets than turtle (same seed + difficulty)", () => {
-  // Run both personalities under Normal difficulty for a fixed tick count and compare _aiSends.
-  // Aggregate across seeds for robustness (a single seed can be noisy due to map layout).
-  let rusherSends = 0,
-    turtleSends = 0;
-  for (const seed of [11, 13, 17, 19, 23, 29]) {
-    const make = (personality) =>
-      createWorld({
-        seed,
-        asteroidCount: 14,
-        planetMin: 0,
-        planetMax: 1,
-        aiPersonality: personality,
-        players: [
-          { id: 0, isAi: false, difficulty: 0 },
-          { id: 1, isAi: true, difficulty: 1 },
-        ],
-      });
-    const wr = make("rusher");
-    const wt = make("turtle");
-    for (let t = 0; t < 2000; t++) {
-      Sim.step(wr, 1 / 30);
-      Sim.step(wt, 1 / 30);
-    }
-    rusherSends += wr.players[1]._aiSends;
-    turtleSends += wt.players[1]._aiSends;
-  }
+test("personality: applies at Hard — rusher more aggressive than turtle (white-box)", () => {
+  // Personalities are gated to Hard+. At Hard the modifiers shift the effective knobs: rusher
+  // attacks harder/faster, turtle is more passive, both straddling the neutral baseline.
+  const hard = (p) => effKnobs({ difficulty: 2, personality: p });
+  const r = hard("rusher"),
+    t = hard("turtle"),
+    n = hard("neutral");
   assert.ok(
-    rusherSends > turtleSends,
-    `rusher aggregate sends ${rusherSends} should exceed turtle ${turtleSends}`,
+    r.aggression > n.aggression && n.aggression > t.aggression,
+    "aggression: rusher > neutral > turtle at Hard",
+  );
+  assert.ok(
+    r.fraction > t.fraction,
+    "rusher commits a larger fraction than turtle",
+  );
+  assert.ok(
+    r.interval < t.interval,
+    "rusher decides faster (shorter interval) than turtle",
+  );
+});
+
+test("personality: ignored below Hard — Easy/Normal play the calibrated baseline", () => {
+  // The whole point of the gate: a Normal (or Easy) AI plays the SAME regardless of which
+  // personality it rolled, so the lower difficulties stay predictable and beatable.
+  for (const diff of [0, 1]) {
+    const baseline = effKnobs({ difficulty: diff, personality: "neutral" });
+    for (const p of ["rusher", "turtle", "expander", "superweapon-fiend"]) {
+      assert.deepEqual(
+        effKnobs({ difficulty: diff, personality: p }),
+        baseline,
+        `difficulty ${diff} must ignore personality '${p}'`,
+      );
+    }
+  }
+  // Sanity: Hard DOES apply them, so the gate is at the right tier (not disabling personalities).
+  assert.notDeepEqual(
+    effKnobs({ difficulty: 2, personality: "rusher" }),
+    effKnobs({ difficulty: 2, personality: "neutral" }),
+    "Hard must still apply personalities",
   );
 });
 

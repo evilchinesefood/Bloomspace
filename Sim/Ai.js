@@ -45,12 +45,12 @@ const KNOBS = [
     techBuffer: 0,
   },
   {
-    interval: 2.3,
-    fraction: 0.52,
+    interval: 2.7,
+    fraction: 0.46,
     attack: true,
     plant: true,
-    aggression: 0.3,
-    techChance: 0.18,
+    aggression: 0.22,
+    techChance: 0.12,
     techBuffer: 30,
   },
   {
@@ -139,12 +139,21 @@ export const PERSONALITY_NAMES = Object.keys(PERSONALITIES).filter(
   (k) => k !== "neutral",
 );
 
+// Personalities only spice up the harder AIs (Hard+). Easy/Normal play the calibrated baseline so
+// they stay predictable and beatable — a Normal AI never randomly rolls into an aggressive rusher.
+const PERSONALITY_MIN_DIFFICULTY = 2;
+function personalityOf(player) {
+  return (player.difficulty | 0) >= PERSONALITY_MIN_DIFFICULTY
+    ? (PERSONALITIES[player.personality] ?? PERSONALITIES.neutral)
+    : PERSONALITIES.neutral;
+}
+
 // Compute effective numeric knobs for a player, blending difficulty base with personality.
 // Returns a plain object (not the original) so callers can freely read without aliasing concerns.
 // Boolean gates (attack, plant) are copied verbatim — personality cannot flip them.
-function effKnobs(player) {
+export function effKnobs(player) {
   const base = KNOBS[Math.max(0, Math.min(3, player.difficulty | 0))];
-  const pm = PERSONALITIES[player.personality] ?? PERSONALITIES.neutral;
+  const pm = personalityOf(player);
   return {
     interval: Math.max(0.3, base.interval * pm.intMul),
     fraction: Math.min(1.0, Math.max(0.1, base.fraction * pm.fracMul)),
@@ -168,7 +177,7 @@ export function effBombKnobs(player) {
   if (diff < BOMBARD_MIN_DIFFICULTY) return null;
   const base = BOMB_KNOBS[diff];
   if (!base) return null;
-  const pm = PERSONALITIES[player.personality] ?? PERSONALITIES.neutral;
+  const pm = personalityOf(player);
   return {
     buildEnergy: Math.max(60, base.buildEnergy + pm.beAdd),
     buildBuffer: base.buildBuffer,
