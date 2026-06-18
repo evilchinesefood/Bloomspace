@@ -1,6 +1,6 @@
 // Sw.js — service worker. Cache-first with network fallback.
 // IMPORTANT: bump CACHE_VERSION on EVERY deploy or clients keep stale assets.
-const CACHE_VERSION = "bloomspace-v27";
+const CACHE_VERSION = "bloomspace-v28";
 
 // App shell + heavy vendored deps. Web Awesome statically imports a graph of chunks from
 // its loader and also lazy-loads component chunks on demand; that recursive chunk graph is
