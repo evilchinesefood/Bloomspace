@@ -32,7 +32,7 @@ export const FLOWER_SEEDS = 2; // seeds added to owner per flower
 
 export const DEFENSE_INTERVAL = 5; // defense tree: seconds between defender spawns
 export const DEFENDER_ENERGY_COST = 6; // energy per defender spawn
-export const DEFENDERS_MAX = 6; // cap of defenders orbiting one rock
+export const DEFENDERS_PER_TREE = 6; // defenders per mature defense tree
 
 function playerById(world, id) {
   const ps = world.players;
@@ -40,15 +40,28 @@ function playerById(world, id) {
   return null;
 }
 
-// Count living seedlings owned by `owner` home'd at asteroid `rockId`, in ANY state (so
-// in-transit defenders still count toward the defender cap). Differs from Ai.js's
-// orbit-only deployable count — hence the distinct name.
-function homedCount(world, rockId, owner) {
+// Count living defenders (KIND.DEFENDER) owned by `owner` home'd at `rockId`, any state
+// (in-transit defenders still count — same rationale as the old homedCount).
+function defenderCount(world, rockId, owner) {
   const s = world.seed;
   let n = 0;
   for (let i = 0; i < s.count; i++) {
-    if (s.home[i] === rockId && s.owner[i] === owner) n++;
+    if (
+      s.home[i] === rockId &&
+      s.owner[i] === owner &&
+      s.kind[i] === KIND.DEFENDER
+    )
+      n++;
   }
+  return n;
+}
+
+// Mature defense trees on a rock (growth >= 1). Mirrors matureBombardCount.
+function matureDefenseCount(rock) {
+  const trees = rock.trees;
+  let n = 0;
+  for (let i = 0; i < trees.length; i++)
+    if (trees[i].type === "defense" && (trees[i].growth ?? 0) >= 1) n++;
   return n;
 }
 
@@ -112,6 +125,8 @@ export function updateTrees(world, dt) {
     const rock = asts[a];
     if (rock.dead || rock.owner === OWNER_NEUTRAL) continue;
     const trees = rock.trees;
+    // Compute defender cap once per rock (O(trees) not O(trees²)).
+    const defCap = matureDefenseCount(rock) * DEFENDERS_PER_TREE;
     for (let t = 0; t < trees.length; t++) {
       const tree = trees[t];
       if (tree.growth < 1) {
@@ -126,7 +141,8 @@ export function updateTrees(world, dt) {
         if (tree.cooldown <= 0) {
           tree.cooldown = DEFENSE_INTERVAL;
           if (
-            homedCount(world, rock.id, rock.owner) < DEFENDERS_MAX &&
+            defCap > 0 &&
+            defenderCount(world, rock.id, rock.owner) < defCap &&
             spendEnergy(rock, DEFENDER_ENERGY_COST)
           ) {
             spawnOrbiter(world, rock, KIND.DEFENDER);

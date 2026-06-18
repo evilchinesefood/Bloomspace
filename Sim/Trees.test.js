@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createWorld, STARTING_SEEDS, OWNER_NEUTRAL } from "./World.js";
+import { createWorld, STARTING_SEEDS, OWNER_NEUTRAL, KIND } from "./World.js";
 import Sim from "./World.js";
 import {
   plantTree,
   updateTrees,
   TREE_SEED_COST,
   TREE_ENERGY_COST,
-  DEFENDERS_MAX,
+  DEFENDERS_PER_TREE,
 } from "./Trees.js";
 import { setRally } from "./Seedlings.js";
 
@@ -141,7 +141,7 @@ test("defense tree spawns defenders up to the cap, not beyond", () => {
   for (let i = 0; i < w.seed.count; i++)
     if (w.seed.home[i] === rock.id && w.seed.owner[i] === 0) defenders++;
   assert.ok(defenders > 0, "defense tree should spawn defenders");
-  assert.ok(defenders <= DEFENDERS_MAX, "must not exceed cap");
+  assert.ok(defenders <= DEFENDERS_PER_TREE, "must not exceed cap with 1 tree");
 });
 
 test("defenders re-topped to cap with energy regen via full step()", () => {
@@ -156,7 +156,10 @@ test("defenders re-topped to cap with energy regen via full step()", () => {
   let defenders = 0;
   for (let i = 0; i < w.seed.count; i++)
     if (w.seed.home[i] === rock.id && w.seed.owner[i] === 0) defenders++;
-  assert.ok(defenders <= DEFENDERS_MAX, "cap holds under full step");
+  assert.ok(
+    defenders <= DEFENDERS_PER_TREE,
+    "cap holds under full step (1 tree)",
+  );
 });
 
 // --- Determinism ------------------------------------------------------------
@@ -261,6 +264,122 @@ test("rally drains a rock's existing orbiting fighters to the anchor (no tree ne
   );
 });
 
+// --- Defender scaling with mature defense trees ---------------------------
+
+test("3 mature defense trees allow up to 18 defenders (DEFENDERS_PER_TREE * 3)", () => {
+  const w = world(5);
+  const rock = neutralRock(w);
+  rock.owner = 0;
+  rock.energyStat = 200;
+  rock.energy = 9999;
+  w.players[0].seeds = 200;
+  w.seed.count = 0;
+  // Plant 3 defense trees and instantly mature them
+  for (let i = 0; i < 3; i++) {
+    assert.ok(plantTree(w, rock.id, "defense", 0), `tree ${i} plant failed`);
+    rock.trees[rock.trees.length - 1].growth = 1;
+  }
+  // Run long enough to fill the cap
+  for (let t = 0; t < 12000; t++) updateTrees(w, DT);
+  let defenders = 0;
+  for (let i = 0; i < w.seed.count; i++)
+    if (
+      w.seed.home[i] === rock.id &&
+      w.seed.owner[i] === 0 &&
+      w.seed.kind[i] === 1
+    )
+      defenders++;
+  assert.equal(
+    defenders,
+    DEFENDERS_PER_TREE * 3,
+    `expected exactly ${DEFENDERS_PER_TREE * 3} defenders, got ${defenders}`,
+  );
+});
+
+test("fighters homed to rock do not block defender spawns", () => {
+  const w = world(6);
+  const rock = neutralRock(w);
+  rock.owner = 0;
+  rock.energyStat = 200;
+  rock.energy = 9999;
+  w.players[0].seeds = 100;
+  w.seed.count = 0;
+  // Stuff rock with fighters (KIND.FIGHTER = 0) well past old flat cap
+  for (let i = 0; i < 20; i++)
+    Sim.spawnSeedling(w, { home: rock.id, owner: 0, kind: 0 });
+  // Plant and mature one defense tree
+  assert.ok(plantTree(w, rock.id, "defense", 0));
+  rock.trees[rock.trees.length - 1].growth = 1;
+  // Run until defenders spawn
+  for (let t = 0; t < 6000; t++) updateTrees(w, DT);
+  let defenders = 0;
+  for (let i = 0; i < w.seed.count; i++)
+    if (
+      w.seed.home[i] === rock.id &&
+      w.seed.owner[i] === 0 &&
+      w.seed.kind[i] === 1
+    )
+      defenders++;
+  assert.ok(defenders > 0, "fighters must not block defender spawns");
+});
+
+test("energy gates defender spawns even when under cap", () => {
+  const w = world(7);
+  const rock = neutralRock(w);
+  rock.owner = 0;
+  rock.energyStat = 0; // no regen
+  rock.energy = 200; // enough to plant
+  w.players[0].seeds = 100;
+  w.seed.count = 0;
+  assert.ok(plantTree(w, rock.id, "defense", 0));
+  rock.trees[rock.trees.length - 1].growth = 1;
+  rock.energy = 0; // drain to empty after planting
+  for (let t = 0; t < 6000; t++) updateTrees(w, DT);
+  let defenders = 0;
+  for (let i = 0; i < w.seed.count; i++)
+    if (
+      w.seed.home[i] === rock.id &&
+      w.seed.owner[i] === 0 &&
+      w.seed.kind[i] === 1
+    )
+      defenders++;
+  assert.equal(defenders, 0, "no energy → no defenders");
+});
+
+test("immature defense trees do not raise the defender cap", () => {
+  const w = world(9);
+  const rock = neutralRock(w);
+  rock.owner = 0;
+  rock.energyStat = 200;
+  rock.energy = 9999;
+  w.players[0].seeds = 200;
+  w.seed.count = 0;
+  // Plant 3 defense trees and pin growth to 0 (never matures)
+  for (let i = 0; i < 3; i++) {
+    assert.ok(plantTree(w, rock.id, "defense", 0));
+    rock.trees[rock.trees.length - 1].growth = 0;
+  }
+  // Run < GROW_TIME (8s) so trees never reach maturity: 100 ticks ≈ 3.3s
+  for (let t = 0; t < 100; t++) {
+    updateTrees(w, DT);
+    // keep all trees pinned at growth 0
+    for (const tr of rock.trees) tr.growth = 0;
+  }
+  let defenders = 0;
+  for (let i = 0; i < w.seed.count; i++)
+    if (
+      w.seed.home[i] === rock.id &&
+      w.seed.owner[i] === 0 &&
+      w.seed.kind[i] === 1
+    )
+      defenders++;
+  assert.equal(
+    defenders,
+    0,
+    "immature trees contribute 0 to the cap → no defenders spawn",
+  );
+});
+
 test("rally keeps defenders (kind 1) home while funneling fighters", () => {
   const w = world();
   const home = ownedRock(w);
@@ -273,7 +392,12 @@ test("rally keeps defenders (kind 1) home while funneling fighters", () => {
   const defendersHome = () => {
     let n = 0;
     for (let i = 0; i < s.count; i++)
-      if (s.owner[i] === 0 && s.home[i] === home.id && s.kind[i] === 1) n++;
+      if (
+        s.owner[i] === 0 &&
+        s.home[i] === home.id &&
+        s.kind[i] === KIND.DEFENDER
+      )
+        n++;
     return n;
   };
   assert.equal(
