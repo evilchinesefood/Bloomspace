@@ -229,6 +229,32 @@ test("deserialize rejects a wrong/missing version → null", () => {
   assert.equal(deserialize(null), null);
 });
 
+test("deserialize rejects a truncated seed field → null", () => {
+  const w = makeWorld();
+  const saved = serialize(w);
+  assert.ok(saved.seed.count > 1, "need live seedlings to truncate");
+  // Lop the tail off one field so it's shorter than count — would otherwise leave tail
+  // seedlings at default owner/home (silent corruption). Must reject to null.
+  saved.seed.fields.owner = saved.seed.fields.owner.slice(
+    0,
+    saved.seed.count - 1,
+  );
+  assert.equal(deserialize(saved), null);
+});
+
+test("deserialize defaults a missing winConfig key (no NaN domination)", () => {
+  const w = makeWorld();
+  const saved = serialize(w);
+  delete saved.winConfig.dominationPct; // simulate a future-schema save missing a key
+  const w2 = deserialize(saved);
+  assert.ok(w2, "still restores");
+  assert.equal(
+    w2.winConfig.dominationPct,
+    0.6,
+    "missing key falls back to default",
+  );
+});
+
 // --- 4. JSON-SAFETY (real localStorage string round-trip) -------------------
 
 test("JSON.stringify/parse round-trips the saved object and still deserializes", () => {

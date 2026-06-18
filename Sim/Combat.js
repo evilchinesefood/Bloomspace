@@ -104,6 +104,10 @@ export function resolveCombat(world, dt) {
   loadStrMult(world); // per-owner strength-tech factor (1.0 = no tech), constant this tick
   engaged.fill(0, 0, s.count);
 
+  // A SLING ship counts as "on" the body it's passing (its target); a stationed ship on its
+  // home. Shared by both passes so co-located non-TRANSIT pairs are owned by the same-body pass.
+  const bodyOf = (i) => (s.state[i] === STATE.SLING ? s.target[i] : s.home[i]);
+
   // Proximity damage: enemies within CONTACT_RADIUS (fly-bys + converging ships). Damage is
   // read from `strength` (not the depleted `energy`), so the pass is order-independent.
   for (let i = 0; i < s.count; i++) {
@@ -119,6 +123,16 @@ export function resolveCombat(world, dt) {
         for (let b = 0; b < bucket.length; b++) {
           const j = bucket[b];
           if (j === i || s.owner[j] === oi) continue; // no friendly fire
+          // Co-located non-TRANSIT pairs on the SAME valid body are billed by the same-body pass —
+          // skip them here so a tight orbit doesn't get double-charged proximity damage too. (home
+          // -1 is a "no real body" sentinel the same-body pass ignores, so it doesn't count.)
+          if (
+            s.state[i] !== STATE.TRANSIT &&
+            s.state[j] !== STATE.TRANSIT &&
+            bodyOf(i) >= 0 &&
+            bodyOf(i) === bodyOf(j)
+          )
+            continue;
           const dx = s.x[j] - xi;
           const dy = s.y[j] - yi;
           if (dx * dx + dy * dy > R2) continue;
@@ -135,7 +149,6 @@ export function resolveCombat(world, dt) {
   // orbit distance — no peaceful stand-off on a shared rock. A SLING ship (mid slingshot
   // around a body it's passing) counts as "on" that body (its target), so it trades fire with
   // anything stationed there for the duration of the arc. Pure TRANSIT fly-bys use proximity.
-  const bodyOf = (i) => (s.state[i] === STATE.SLING ? s.target[i] : s.home[i]);
   strAt.fill(0, 0, A * MAXO);
   totAt.fill(0, 0, A);
   for (let i = 0; i < s.count; i++) {
@@ -176,9 +189,9 @@ export function resolveCombat(world, dt) {
   }
 
   // Compaction swap-removed DEAD ships, so the grid built above now holds stale indices.
-  // Rebuild it (O(n)) before flipOwnership queries it by cell — cheaper overall than the
-  // old O(asteroids × seedlings) full scan once ship/rock counts grow.
-  if (s.count > 0) rebuildGrid(world);
+  // Always rebuild (O(n)) before flipOwnership queries it by cell — at n=0 it clears every
+  // bucket and flipOwnership then iterates nothing, so no stale post-compaction reads remain.
+  rebuildGrid(world);
   flipOwnership(world);
 }
 

@@ -39,12 +39,23 @@ function ownedRocks(world, owner) {
   for (const a of world.asteroids) if (a.owner === owner) n++;
   return n;
 }
+// Players are a fixed set per match; build an id→player lookup once and reuse it (rebuilt only
+// if the players array identity changes, which it doesn't mid-match) instead of scanning each frame.
+let _pById = null,
+  _pArr = null;
+function playerById(world, id) {
+  if (_pArr !== world.players) {
+    _pArr = world.players;
+    _pById = new Map(world.players.map((p) => [p.id, p]));
+  }
+  return _pById.get(id);
+}
 function playerSeeds(world, id) {
-  const p = world.players.find((p) => p.id === id);
+  const p = playerById(world, id);
   return p ? Math.floor(p.seeds ?? 0) : 0;
 }
 function playerTechLevel(world, id, track) {
-  const p = world.players.find((p) => p.id === id);
+  const p = playerById(world, id);
   return p && p.tech ? p.tech[track] | 0 : 0;
 }
 // Tier dots like ●●○ for a level out of MAX_TIER.
@@ -80,20 +91,21 @@ export function createHud(root, api) {
       "background:linear-gradient(180deg,rgba(5,7,15,.85),rgba(5,7,15,0));font:600 .95rem system-ui;",
   });
 
-  const stat = (icon, color) => {
+  const stat = (icon, color, label) => {
     const v = el("span", { textContent: "0" });
     const box = el(
       "div",
       {
+        "aria-label": label,
         style: `display:flex;align-items:center;gap:.4rem;color:${color};`,
       },
-      [el("i", { class: "fa-solid fa-" + icon }), v],
+      [el("i", { class: "fa-solid fa-" + icon, "aria-hidden": "true" }), v],
     );
     return { box, set: (t) => (v.textContent = String(t)) };
   };
 
-  const seedsStat = stat("seedling", "#5dff9b"); // harvestable seeds
-  const rocksStat = stat("asterisk", "#46e8ff"); // owned asteroids
+  const seedsStat = stat("seedling", "#5dff9b", "Seeds"); // harvestable seeds
+  const rocksStat = stat("asterisk", "#46e8ff", "Asteroids owned"); // owned asteroids
 
   bar.append(seedsStat.box, rocksStat.box);
 
@@ -106,12 +118,17 @@ export function createHud(root, api) {
   const group = el("wa-button-group", { label: "Speed" });
   const pauseBtn = el("wa-button", {
     size: "small",
+    "aria-label": "Pause",
     html: '<i class="fa-solid fa-pause"></i>',
   });
   pauseBtn.addEventListener("click", () => api.setPaused(!api.isPaused()));
   group.append(pauseBtn);
   for (const sp of speeds) {
-    const b = el("wa-button", { size: "small", textContent: sp + "×" });
+    const b = el("wa-button", {
+      size: "small",
+      "aria-label": sp + "× speed",
+      textContent: sp + "×",
+    });
     b.addEventListener("click", () => {
       api.setPaused(false);
       api.setSpeed(sp);
@@ -129,6 +146,7 @@ export function createHud(root, api) {
   const settingsBtn = el("wa-button", {
     size: "small",
     id: "BsSettingsBtn",
+    "aria-label": "Settings",
     html: '<i class="fa-solid fa-gear"></i>',
   });
   bar.append(group, techBtn, settingsBtn);
@@ -351,8 +369,12 @@ export function createHud(root, api) {
       ? "fa-solid fa-play"
       : "fa-solid fa-pause";
     pauseBtn.variant = paused ? "brand" : "neutral";
-    for (const [s, b] of speedBtns)
-      b.variant = !paused && s === sp ? "brand" : "neutral";
+    pauseBtn.setAttribute("aria-label", paused ? "Play" : "Pause");
+    for (const [s, b] of speedBtns) {
+      const on = !paused && s === sp;
+      b.variant = on ? "brand" : "neutral";
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+    }
   }
 
   // --- Asteroid info panel ---------------------------------------------------
@@ -410,6 +432,8 @@ export function createHud(root, api) {
   // Enemy-bombardment WARNING banner — pinned a row BELOW the arming banners so it can show at
   // the same time (e.g. you're arming while an enemy is charging). Pulses to draw the eye.
   const warnBanner = el("div", {
+    class: "bsWarnBanner",
+    role: "alert",
     style:
       "position:absolute;top:116px;left:50%;transform:translateX(-50%);pointer-events:none;" +
       "display:none;align-items:center;gap:.5rem;padding:.45rem .85rem;border-radius:999px;" +
@@ -419,12 +443,14 @@ export function createHud(root, api) {
     html: '<i class="fa-solid fa-triangle-exclamation"></i>Enemy bombardment charging!',
   });
   root.append(warnBanner);
-  // One-time keyframes for the warning pulse (idempotent — guard on a sentinel id).
+  // One-time keyframes for the warning pulse (idempotent — guard on a sentinel id). Reduced-motion
+  // users get the steady banner (no pulse) — fast opacity flicker is a photosensitivity trigger.
   if (!document.getElementById("BsWarnKeyframes")) {
     const st = el("style", {
       id: "BsWarnKeyframes",
       textContent:
-        "@keyframes bsWarnPulse{0%,100%{opacity:.7;}50%{opacity:1;}}",
+        "@keyframes bsWarnPulse{0%,100%{opacity:.7;}50%{opacity:1;}}" +
+        "@media (prefers-reduced-motion: reduce){.bsWarnBanner{animation:none;}}",
     });
     document.head.append(st);
   }
@@ -443,6 +469,11 @@ export function createHud(root, api) {
     const track = el(
       "div",
       {
+        role: "progressbar",
+        "aria-label": label,
+        "aria-valuemin": "0",
+        "aria-valuemax": "100",
+        "aria-valuenow": "0",
         style:
           "height:8px;border-radius:4px;background:rgba(255,255,255,.1);overflow:hidden;",
       },
@@ -461,6 +492,7 @@ export function createHud(root, api) {
       set: (val) => {
         const v = Math.max(0, Math.min(100, val));
         fill.style.width = v + "%";
+        track.setAttribute("aria-valuenow", String(Math.round(val)));
         row.querySelector(".v").textContent = Math.round(val);
       },
     };
@@ -625,8 +657,12 @@ export function createHud(root, api) {
     sBar.set(a.strengthStat);
     spBar.set(a.speedStat);
     energyEl.textContent = `Stored energy: ${Math.round(a.energy)}`;
-    const seedT = a.trees.filter((t) => t.type === "seedling").length;
-    const defT = a.trees.filter((t) => t.type === "defense").length;
+    let seedT = 0,
+      defT = 0;
+    for (const t of a.trees) {
+      if (t.type === "seedling") seedT++;
+      else if (t.type === "defense") defT++;
+    }
     const bombT = countBombard(a);
     treesEl.textContent =
       a.trees.length === 0

@@ -36,7 +36,6 @@ export function glyphTexture(code, px = 128) {
       .load('900 1em "Font Awesome 6 Free"')
       .then(draw)
       .catch(() => {});
-    document.fonts.ready.then(draw);
   }
   return tex;
 }

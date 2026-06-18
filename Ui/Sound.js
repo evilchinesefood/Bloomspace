@@ -14,7 +14,7 @@ const SFX_FILES = {
   capture: "Capture.wav",
   death: "Death.wav",
   plant: "Plant.wav",
-  fire: "Fire.wav", // reserved (bombardment) — buffer ready, no emitter yet
+  fire: "Fire.wav", // bombardment — emitted by Sim/Bombard.js, played in Game.js render()
   win: "Win.wav",
   lose: "Lose.wav",
 };

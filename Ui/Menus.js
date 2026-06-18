@@ -124,6 +124,7 @@ export function showStartMenu(
 ) {
   const wrap = overlay("background:#05070f;backdrop-filter:none;");
   const sky = el("canvas", {
+    "aria-hidden": "true", // decorative starfield — hide from assistive tech
     style: "position:absolute;inset:0;width:100%;height:100%;display:block;",
   });
   wrap.append(sky);
@@ -242,24 +243,21 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     if (cleanup()) onCancel && onCancel();
   });
 
-  const field = (labelText, control) =>
-    el("div", { style: "margin-bottom:1.1rem;" }, [
-      el("label", {
-        style: "display:block;margin-bottom:.35rem;font:600 .85rem system-ui;",
-        textContent: labelText,
-      }),
-      control,
-    ]);
+  // a11y: each control carries its own native `label` attribute (Web Awesome associates it with
+  // the field), so field() just adds spacing — no detached <label> to mis-associate.
+  const field = (control) =>
+    el("div", { style: "margin-bottom:1.1rem;" }, [control]);
 
   // NOTE: wa-select values are set AFTER the components define (see below) — setting `value`
   // before the <wa-option> children exist fails to pre-fill on a rebuilt dialog (New Game).
-  const sizeSel = el("wa-select", {}, [
+  const sizeSel = el("wa-select", { label: "Map size" }, [
     el("wa-option", { value: "small", textContent: "Small (14 bodies)" }),
     el("wa-option", { value: "medium", textContent: "Medium (26 bodies)" }),
     el("wa-option", { value: "large", textContent: "Large (44 bodies)" }),
   ]);
 
   const countSlider = el("wa-slider", {
+    label: "Asteroid count",
     min: 6,
     max: 60,
     value: 26,
@@ -268,20 +266,20 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     style: "width:100%;",
   });
 
-  const aiSel = el("wa-select", {}, [
+  const aiSel = el("wa-select", { label: "AI opponents" }, [
     el("wa-option", { value: "1", textContent: "1 AI opponent" }),
     el("wa-option", { value: "2", textContent: "2 AI opponents" }),
     el("wa-option", { value: "3", textContent: "3 AI opponents" }),
   ]);
 
-  const diffSel = el("wa-select", {}, [
+  const diffSel = el("wa-select", { label: "Difficulty" }, [
     el("wa-option", { value: "0", textContent: "Easy (passive)" }),
     el("wa-option", { value: "1", textContent: "Normal" }),
     el("wa-option", { value: "2", textContent: "Hard" }),
     el("wa-option", { value: "3", textContent: "Brutal" }),
   ]);
 
-  const winSel = el("wa-select", {}, [
+  const winSel = el("wa-select", { label: "Win condition" }, [
     el("wa-option", { value: "elimination", textContent: "Elimination" }),
     el("wa-option", {
       value: "domination",
@@ -290,26 +288,32 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
   ]);
 
   // Time-limit options map to seconds (0 = no cap).
-  const timeSel = el("wa-select", {}, [
+  const timeSel = el("wa-select", { label: "Time limit" }, [
     el("wa-option", { value: "0", textContent: "No limit" }),
     el("wa-option", { value: "300", textContent: "5 minutes" }),
     el("wa-option", { value: "600", textContent: "10 minutes" }),
     el("wa-option", { value: "900", textContent: "15 minutes" }),
   ]);
 
-  // Map size preset also nudges the default asteroid count.
-  sizeSel.addEventListener("change", () => {
+  // Map size preset nudges the default asteroid count AND clamps the slider's max to a count
+  // the chosen map can actually fit (rejection sampling caps placement far below big requests:
+  // ~16 small / ~36 medium / 60 large). Keeps the request honest with no MapGen change.
+  const SIZE_MAX = { small: 16, medium: 36, large: 60 };
+  const applySizeToSlider = () => {
     const p = SIZES[sizeSel.value] || SIZES.medium;
-    countSlider.value = p.asteroids;
-  });
+    const mx = SIZE_MAX[sizeSel.value] || 60;
+    countSlider.max = mx;
+    countSlider.value = Math.min(p.asteroids, mx);
+  };
+  sizeSel.addEventListener("change", applySizeToSlider);
 
   dialog.append(
-    field("Map size", sizeSel),
-    field("Asteroid count", countSlider),
-    field("AI opponents", aiSel),
-    field("Difficulty", diffSel),
-    field("Win condition", winSel),
-    field("Time limit", timeSel),
+    field(sizeSel),
+    field(countSlider),
+    field(aiSel),
+    field(diffSel),
+    field(winSel),
+    field(timeSel),
   );
 
   const cancelBtn = el("wa-button", {
@@ -371,6 +375,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     diffSel.value = "1";
     winSel.value = "elimination";
     timeSel.value = "0";
+    applySizeToSlider(); // clamp slider max to the (medium) default size
   };
   if (window.customElements && customElements.whenDefined) {
     customElements.whenDefined("wa-select").then(prefill);
@@ -404,6 +409,7 @@ export function showGameOver(root, status, { onNewGame }) {
   const v = GAME_OVER_VARIANTS[status] || GAME_OVER_VARIANTS.lost;
   const wrap = overlay();
   const card = el("wa-card", {
+    role: "alert", // announce win/lose/draw the moment the screen appears
     style:
       "pointer-events:auto;max-width:420px;width:90%;text-align:center;--padding:2rem;",
   });

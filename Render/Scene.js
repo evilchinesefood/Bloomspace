@@ -166,10 +166,7 @@ export function createScene(canvas, world) {
     // fires resize) re-sharpens the backing store. composer caches its own ratio, so update
     // both; EffectComposer.setSize already scales render targets by it internally.
     const pr = Math.min(window.devicePixelRatio, 2);
-    if (renderer.getPixelRatio() !== pr) {
-      renderer.setPixelRatio(pr);
-      if (composer.setPixelRatio) composer.setPixelRatio(pr);
-    }
+    if (renderer.getPixelRatio() !== pr) renderer.setPixelRatio(pr);
     renderer.setSize(w, h, false);
     composer.setSize(w, h);
     bloom.setSize(
@@ -373,7 +370,23 @@ export function createScene(canvas, world) {
   canvas.addEventListener("webglcontextlost", onContextLost, false);
   canvas.addEventListener("webglcontextrestored", onContextRestored, false);
 
+  // rAF-coalesce the WINDOW resize listener only: bloom.setSize() reallocates all of
+  // UnrealBloomPass's render targets, so dragging the window edge must not fire resize() dozens
+  // of times/sec. Direct resize() calls (context-restore, game.resize) stay synchronous.
+  let resizeRaf = 0;
+  function onWindowResize() {
+    if (resizeRaf) return;
+    resizeRaf = requestAnimationFrame(() => {
+      resizeRaf = 0;
+      resize();
+    });
+  }
+
   function disposeControls() {
+    if (resizeRaf) {
+      cancelAnimationFrame(resizeRaf);
+      resizeRaf = 0;
+    }
     canvas.removeEventListener("wheel", onWheel);
     canvas.removeEventListener("pointerdown", onPointerDown);
     canvas.removeEventListener("pointermove", onPointerMove);
@@ -389,7 +402,7 @@ export function createScene(canvas, world) {
     bloom.enabled = !!on;
   }
 
-  window.addEventListener("resize", resize);
+  window.addEventListener("resize", onWindowResize);
   resize();
 
   return {
@@ -399,7 +412,9 @@ export function createScene(canvas, world) {
     camera,
     composer,
     bloom,
+    outputPass,
     resize,
+    onWindowResize,
     resetCamera,
     centerOn,
     getViewRect,

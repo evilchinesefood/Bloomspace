@@ -260,7 +260,8 @@ export function launchSeedling(world, i, dest) {
 export function setRally(world, fromId, toId, owner) {
   const rock = world.asteroids[fromId];
   if (!rock || rock.owner !== owner) return false;
-  rock.rally = toId === fromId || !world.asteroids[toId] ? -1 : toId;
+  const tgt = world.asteroids[toId];
+  rock.rally = toId === fromId || !tgt || tgt.dead ? -1 : toId;
   return true;
 }
 
@@ -278,7 +279,7 @@ export function updateRally(world, dt) {
     if (!rock || rock.rally == null || rock.rally < 0 || rock.owner < 0)
       continue;
     const tgt = world.asteroids[rock.rally];
-    if (!tgt || tgt.id === rock.id) {
+    if (!tgt || tgt.id === rock.id || tgt.dead) {
       rock.rally = -1;
       continue;
     }

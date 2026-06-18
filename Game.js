@@ -100,9 +100,12 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
     for (const a of world.asteroids) {
       if (!a.trees || a.trees.length === 0) continue;
       // A "mature seedling tree" — gentle bloom over rocks actively producing.
-      const mature = a.trees.some(
-        (t) => t.type === "seedling" && t.growth >= 1,
-      );
+      let mature = false;
+      for (const t of a.trees)
+        if (t.type === "seedling" && t.growth >= 1) {
+          mature = true;
+          break;
+        }
       if (mature) fx.spawnFlower(a.x, a.y, ownerColorHex(a.owner));
     }
   }
@@ -158,7 +161,8 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
     sound.destroy();
     input.destroy();
     // Drop the resize listener the scene registered so matches don't stack handlers.
-    if (scene.resize) window.removeEventListener("resize", scene.resize);
+    if (scene.onWindowResize)
+      window.removeEventListener("resize", scene.onWindowResize);
     // Drop the camera control listeners (wheel/pointer/contextmenu) too.
     if (scene.disposeControls) scene.disposeControls();
     // Release the WebGL context so repeated New Game cycles don't exhaust the browser's
@@ -168,6 +172,11 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
       // module-cached glow texture (AsteroidView reuses it across matches).
       disposeSceneGraph(scene.scene, new Set(sharedTextures()));
       scene.composer.dispose && scene.composer.dispose();
+      // EffectComposer.dispose only frees its own read/write targets, not each Pass's. Free the
+      // target-owning passes (UnrealBloomPass's mip-chain targets, OutputPass) so New Game cycles
+      // don't leak framebuffer memory.
+      scene.bloom?.dispose?.();
+      scene.outputPass?.dispose?.();
       scene.renderer.dispose();
       scene.renderer.forceContextLoss && scene.renderer.forceContextLoss();
     } catch (err) {

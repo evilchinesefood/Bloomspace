@@ -345,8 +345,17 @@ export function createAsteroidView(scene, world, camCtl, fx) {
   // Bodies that move each frame (moons, asteroid satellites, binary members) need their
   // instanced body/rim + the network edges rewritten every tick.
   const movingIds = [];
-  for (let i = 0; i < n; i++) if (rocks[i].orbiting) movingIds.push(i);
+  const movingFlag = new Uint8Array(n);
+  for (let i = 0; i < n; i++)
+    if (rocks[i].orbiting) {
+      movingIds.push(i);
+      movingFlag[i] = 1;
+    }
   const hasMoving = movingIds.length > 0;
+
+  // prefers-reduced-motion: damp the battery-ring pulse and beam flicker to constants so the
+  // rings/beams stay visible but don't throb. From the scene controller (Scene.js computes it).
+  const reducedMotion = !!(camCtl && camCtl.reducedMotion);
 
   // --- Bodies: all ASTEROIDS (incl. moons/satellites/binaries) in one instanced rock mesh;
   //     planets and the star/black hole each get their own mesh. ---
@@ -575,11 +584,23 @@ export function createAsteroidView(scene, world, camCtl, fx) {
   scene.add(linkNet);
   function writeLinks() {
     const links = world.links || [];
-    if (links.length !== linkCount) {
+    const countChanged = links.length !== linkCount;
+    if (countChanged) {
       linkCount = links.length;
       linkPos = new Float32Array(links.length * 6);
       linkGeo.setAttribute("position", new THREE.BufferAttribute(linkPos, 3));
+      linkGeo.setDrawRange(0, links.length * 2);
     }
+    // Only rewrite + re-upload when the link set changed or an endpoint is a moving (orbiting)
+    // body — a static link set needs no per-frame rewrite (mirrors the writeNet hasMoving gate).
+    let endpointMoving = false;
+    if (hasMoving)
+      for (let e = 0; e < links.length; e++)
+        if (movingFlag[links[e][0]] || movingFlag[links[e][1]]) {
+          endpointMoving = true;
+          break;
+        }
+    if (!countChanged && !endpointMoving) return;
     for (let e = 0; e < links.length; e++) {
       const a = rocks[links[e][0]];
       const b = rocks[links[e][1]];
@@ -591,7 +612,6 @@ export function createAsteroidView(scene, world, camCtl, fx) {
       linkPos[o + 4] = b.y;
       linkPos[o + 5] = -2.1;
     }
-    linkGeo.setDrawRange(0, links.length * 2);
     if (links.length) linkGeo.attributes.position.needsUpdate = true;
   }
   writeLinks();
@@ -639,6 +659,11 @@ export function createAsteroidView(scene, world, camCtl, fx) {
   const rallySegGeo = new THREE.BufferGeometry();
   let rallySegPos = new Float32Array(0);
   let rallySegCap = -1;
+  // Preallocated scratch for the rally set (grown only on capacity change) — no per-frame
+  // arrays. rallyA/rallyB/rallyFlag hold rock indices for each [from, to, flag] triple.
+  let rallyA = new Int32Array(0);
+  let rallyB = new Int32Array(0);
+  let rallyFlag = new Int32Array(0);
   const rallyLine = new THREE.LineSegments(
     rallySegGeo,
     new THREE.LineBasicMaterial({
@@ -697,6 +722,11 @@ export function createAsteroidView(scene, world, camCtl, fx) {
   const beamGeo = new THREE.BufferGeometry();
   let beamPos = new Float32Array(0);
   let beamCap = -1;
+  // Preallocated scratch for the charging set (grown only on capacity change) — no per-frame
+  // arrays. beamA/beamT hold rock indices, beamProg the charge progress.
+  let beamA = new Int32Array(0);
+  let beamT = new Int32Array(0);
+  let beamProg = new Float32Array(0);
   const beam = new THREE.LineSegments(
     beamGeo,
     new THREE.LineBasicMaterial({
@@ -845,7 +875,7 @@ export function createAsteroidView(scene, world, camCtl, fx) {
         prog = 1 - Math.max(0, Math.min(1, a.bombard.charge / CHARGE_TICKS));
       // Pulse: slow menacing throb when armed; fast, intensifying when charging.
       const speed = charging ? 9 + prog * 9 : 3.2;
-      const pulse = 0.5 + 0.5 * Math.sin(clock * speed);
+      const pulse = reducedMotion ? 0.7 : 0.5 + 0.5 * Math.sin(clock * speed);
       const grow = charging ? 1.18 + prog * 0.5 : 1.12;
       const rr = a.radius * (grow + pulse * (charging ? 0.18 : 0.1));
       dummy.position.set(a.x, a.y, -1.5);
@@ -873,27 +903,37 @@ export function createAsteroidView(scene, world, camCtl, fx) {
   // charge resolves (jitter shrinks). Rebuilt every frame from the live charging set; hidden
   // when nothing is charging.
   function updateBeams() {
-    const pairs = [];
+    if (beamA.length < n) {
+      beamA = new Int32Array(n);
+      beamT = new Int32Array(n);
+      beamProg = new Float32Array(n);
+    }
+    let m = 0;
     for (let i = 0; i < n; i++) {
       const a = rocks[i];
       if (a.dead || !a.bombard) continue;
-      const t = rocks[a.bombard.target];
+      const ti = a.bombard.target;
+      const t = rocks[ti];
       if (!t || t.dead) continue;
-      const prog =
+      beamA[m] = i;
+      beamT[m] = ti;
+      beamProg[m] =
         1 - Math.max(0, Math.min(1, a.bombard.charge / CHARGE_TICKS));
-      pairs.push([a, t, prog]);
+      m++;
     }
-    if (pairs.length === 0) {
+    if (m === 0) {
       beam.visible = false;
       return;
     }
-    if (pairs.length * 2 !== beamCap) {
-      beamCap = pairs.length * 2;
-      beamPos = new Float32Array(pairs.length * 6);
+    if (m * 2 !== beamCap) {
+      beamCap = m * 2;
+      beamPos = new Float32Array(m * 6);
       beamGeo.setAttribute("position", new THREE.BufferAttribute(beamPos, 3));
     }
-    for (let k = 0; k < pairs.length; k++) {
-      const [a, t] = pairs[k];
+    let maxProg = 0;
+    for (let k = 0; k < m; k++) {
+      const a = rocks[beamA[k]];
+      const t = rocks[beamT[k]];
       const o = k * 6;
       beamPos[o] = a.x;
       beamPos[o + 1] = a.y;
@@ -901,12 +941,14 @@ export function createAsteroidView(scene, world, camCtl, fx) {
       beamPos[o + 3] = t.x;
       beamPos[o + 4] = t.y;
       beamPos[o + 5] = -1;
+      if (beamProg[k] > maxProg) maxProg = beamProg[k];
     }
-    beamGeo.setDrawRange(0, pairs.length * 2);
+    beamGeo.setDrawRange(0, m * 2);
     beamGeo.attributes.position.needsUpdate = true;
-    // Brighten + flicker the beam as the worst charge in the set resolves.
-    const maxProg = pairs.reduce((mx, p) => Math.max(mx, p[2]), 0);
-    beam.material.opacity = 0.45 + maxProg * 0.5 + 0.1 * Math.sin(clock * 40);
+    // Brighten + flicker the beam as the worst charge in the set resolves. Under reduced-motion
+    // the flicker term is a steady constant (no ~6 Hz flash).
+    const flick = reducedMotion ? 0.75 : Math.sin(clock * 40);
+    beam.material.opacity = 0.45 + maxProg * 0.5 + 0.1 * flick;
     beam.visible = true;
   }
 
@@ -954,31 +996,46 @@ export function createAsteroidView(scene, world, camCtl, fx) {
       rallyFlags.count = 0;
       return;
     }
-    // pairs: [fromRock, toRock, flagRock] — the flag marks the "other end".
-    const pairs = [];
+    // Triples [from, to, flag] as parallel index scratch — the flag marks the "other end".
+    if (rallyA.length < n) {
+      rallyA = new Int32Array(n);
+      rallyB = new Int32Array(n);
+      rallyFlag = new Int32Array(n);
+    }
+    let m = 0;
     if (showInbound) {
       for (let i = 0; i < n; i++) {
         const r = rocks[i];
-        if (r.rally === sel.id && r.id !== sel.id) pairs.push([r, sel, r]);
+        if (r.rally === sel.id && r.id !== sel.id) {
+          rallyA[m] = i;
+          rallyB[m] = sel.id;
+          rallyFlag[m] = i;
+          m++;
+        }
       }
     } else if (sel.rally >= 0 && rocks[sel.rally]) {
-      pairs.push([sel, rocks[sel.rally], rocks[sel.rally]]);
+      rallyA[m] = sel.id;
+      rallyB[m] = sel.rally;
+      rallyFlag[m] = sel.rally;
+      m++;
     }
-    if (pairs.length === 0) {
+    if (m === 0) {
       rallyLine.visible = false;
       rallyFlags.count = 0;
       return;
     }
-    if (pairs.length * 2 !== rallySegCap) {
-      rallySegCap = pairs.length * 2;
-      rallySegPos = new Float32Array(pairs.length * 6);
+    if (m * 2 !== rallySegCap) {
+      rallySegCap = m * 2;
+      rallySegPos = new Float32Array(m * 6);
       rallySegGeo.setAttribute(
         "position",
         new THREE.BufferAttribute(rallySegPos, 3),
       );
     }
-    for (let k = 0; k < pairs.length; k++) {
-      const [a, b, flag] = pairs[k];
+    for (let k = 0; k < m; k++) {
+      const a = rocks[rallyA[k]];
+      const b = rocks[rallyB[k]];
+      const flag = rocks[rallyFlag[k]];
       const o = k * 6;
       rallySegPos[o] = a.x;
       rallySegPos[o + 1] = a.y;
@@ -995,10 +1052,10 @@ export function createAsteroidView(scene, world, camCtl, fx) {
     // Inbound view tinted distinctly (gold) from the default outbound (teal).
     rallyLine.material.color.setHex(showInbound ? 0xffcf5a : 0x46ffd2);
     rallyFlags.material.color.setHex(showInbound ? 0xffcf5a : 0x46ffd2);
-    rallySegGeo.setDrawRange(0, pairs.length * 2);
+    rallySegGeo.setDrawRange(0, m * 2);
     rallySegGeo.attributes.position.needsUpdate = true;
     rallyLine.visible = true;
-    rallyFlags.count = pairs.length;
+    rallyFlags.count = m;
     rallyFlags.instanceMatrix.needsUpdate = true;
   }
 

@@ -15,7 +15,13 @@
 //     routing resumes identically). Never reordered.
 //   • seed (SoA): count, capacity, and each SEED_FIELDS typed array's USED portion (0..count),
 //     restored into fresh typed arrays of the SAME type (integer fields stay integer).
-import { makeRng, makeSeedArrays, SEED_FIELDS, WORLD_STATUS } from "./World.js";
+import {
+  makeRng,
+  makeSeedArrays,
+  normalizeWinConfig,
+  SEED_FIELDS,
+  WORLD_STATUS,
+} from "./World.js";
 import { rebuildNav } from "./MapGen.js";
 
 export const SAVE_VERSION = 1;
@@ -108,13 +114,18 @@ export function deserialize(saved) {
     return null;
 
   const cap = saved.seed.capacity;
+  // A truncated field (src shorter than count) would leave tail seedlings at defaults — a silently
+  // corrupt world. Reject it: every field must hold exactly `count` values, else null.
+  for (const f of SEED_FIELDS) {
+    const src = saved.seed.fields[f];
+    if (!src || src.length !== saved.seed.count) return null;
+  }
   const seed = makeSeedArrays(cap);
   seed.count = saved.seed.count;
   for (const f of SEED_FIELDS) {
-    const src = saved.seed.fields[f];
     // Copy the used portion back into the correctly-typed array (the typed-array setter coerces
     // each value to that field's exact integer/float type — Int8/Int32/Uint8/Float32).
-    seed[f].set(src, 0);
+    seed[f].set(saved.seed.fields[f], 0);
   }
 
   // rng: a fresh closure, then restore the saved state integer so the stream continues identically.
@@ -140,7 +151,9 @@ export function deserialize(saved) {
     links: cloneJson(saved.links ?? []),
     nebulae: cloneJson(saved.nebulae ?? []),
     belts: cloneJson(saved.belts ?? []),
-    winConfig: cloneJson(saved.winConfig),
+    // Normalize like createWorld so a save missing a winConfig key (future schema add) restores
+    // to the documented default instead of undefined → NaN in checkDomination.
+    winConfig: normalizeWinConfig(saved.winConfig),
     events: makeEvents(cap),
     // Black-hole reap memo — null so World.destroyInBlackHoles recomputes from the live bodies.
     _blackholes: null,

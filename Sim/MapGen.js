@@ -192,6 +192,14 @@ function freeAsteroids(asteroids, blocked) {
 // Pick one home per player from the candidate ids, spread apart via farthest-point seeding.
 function pickHomes(asteroids, candIds, playerCount, rng) {
   if (candIds.length === 0 || playerCount === 0) return [];
+  // Defensive: fewer habitable candidates than players leaves trailing players homeless (read as
+  // already-eliminated by checkVictory). Unreachable via the menu, but surface it for any
+  // programmatic config so the shortfall isn't silent. Determinism for in-range configs unchanged.
+  if (playerCount > candIds.length)
+    console.warn(
+      `pickHomes: ${playerCount} players but only ${candIds.length} home candidates — ` +
+        `${playerCount - candIds.length} player(s) will start homeless`,
+    );
   const homes = [candIds[Math.floor(rng() * candIds.length)]];
   while (homes.length < playerCount && homes.length < candIds.length) {
     let best = -1;

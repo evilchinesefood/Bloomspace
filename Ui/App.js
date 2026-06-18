@@ -29,6 +29,12 @@ export function createApp(root) {
   function freshCanvas() {
     const c = document.createElement("canvas");
     c.id = "Canvas"; // picks up the full-screen #Canvas styling from Index.html
+    // a11y: name the surface for screen readers. No role= — the canvas is pointer-interactive
+    // (drag-to-send), so role="img" would wrongly mark it static.
+    c.setAttribute(
+      "aria-label",
+      "Bloomspace game — use the on-screen panel controls to play",
+    );
     document.body.insertBefore(c, root); // behind the #Ui overlay
     return c;
   }

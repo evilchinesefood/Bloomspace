@@ -492,7 +492,8 @@ function resolveTimeCap(world) {
       bestAiTied = true;
     }
   }
-  if (p0 > bestAi) {
+  if (p0 > bestAi && p0 > 0) {
+    // Require actual presence — "no AI present" (bestAi -1) is not an automatic win.
     world.status = WORLD_STATUS.WON;
     pushEvent(world, EVENT.WIN);
   } else if (bestAi > p0 && !bestAiTied) {

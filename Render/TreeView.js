@@ -85,15 +85,15 @@ export function createTreeView(scene, world) {
         }
       }
     }
-    for (const [mesh, count] of [
-      [sproutMesh, ms],
-      [treeMesh, mt],
-      [defMesh, md],
-    ]) {
-      mesh.count = count;
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    }
+    sproutMesh.count = ms;
+    treeMesh.count = mt;
+    defMesh.count = md;
+    sproutMesh.instanceMatrix.needsUpdate = true;
+    treeMesh.instanceMatrix.needsUpdate = true;
+    defMesh.instanceMatrix.needsUpdate = true;
+    if (sproutMesh.instanceColor) sproutMesh.instanceColor.needsUpdate = true;
+    if (treeMesh.instanceColor) treeMesh.instanceColor.needsUpdate = true;
+    if (defMesh.instanceColor) defMesh.instanceColor.needsUpdate = true;
   }
   update();
 

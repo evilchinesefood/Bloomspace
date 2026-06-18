@@ -129,6 +129,7 @@ export function createTutorial(root, api) {
   });
   // A brief confirmation flash shown when a step is satisfied, just above the prompt.
   const flash = el("div", {
+    "aria-live": "polite",
     style:
       "color:#5dff9b;font:700 .85rem system-ui;height:0;opacity:0;overflow:hidden;" +
       "transition:opacity .25s;margin-bottom:0;",

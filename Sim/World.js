@@ -32,8 +32,8 @@ export const WORLD_STATUS = {
 export const MAX_PLAYERS = 7;
 
 // Event channel tags. Sim records events deterministically during step(); Render drains them
-// each frame for FX + audio. FIRE is reserved for the later bombardment superweapon (no emitter
-// yet). Keep this contract stable — audio and bombardment both build on it.
+// each frame for FX + audio. FIRE is emitted by Bombard.fireBombard and consumed by Game (SFX).
+// Keep this contract stable — audio and bombardment both build on it.
 export const EVENT = {
   DEATH: 0,
   SEND: 1,
@@ -111,10 +111,25 @@ export function makeSeedArrays(capacity) {
   };
 }
 
+// winConfig defaults, applied per-key with ?? so a missing key (fresh config OR a restored save
+// from a future schema) falls back to the documented default instead of undefined. Plain JSON
+// (numbers + one string) so save/resume can serialize it.
+export function normalizeWinConfig(wc = {}) {
+  return {
+    mode: wc.mode ?? "elimination", // "elimination" | "domination"
+    dominationPct: wc.dominationPct ?? 0.6, // fraction of habitable bodies to hold
+    dominationSecs: wc.dominationSecs ?? 25, // continuous seconds at/above pct to win
+    timeLimitSecs: wc.timeLimitSecs ?? 0, // 0 = no time cap
+  };
+}
+
 export function createWorld(config = {}) {
   const width = config.width ?? 1000;
   const height = config.height ?? 1000;
-  const capacity = config.capacity ?? 4096;
+  // SoA capacity scales with asteroid count so big/Brutal matches don't silently stall at the cap
+  // (spawnSeedling returning -1). Serialized, so raising this never breaks existing saves.
+  const capacity =
+    config.capacity ?? Math.max(4096, (config.asteroidCount ?? 0) * 200);
   const world = {
     width,
     height,
@@ -140,14 +155,7 @@ export function createWorld(config = {}) {
   };
   // Win/loss rules. Defaults reproduce CURRENT behavior EXACTLY (pure elimination, no time
   // limit), so omitting config.winConfig drifts zero bits. domination/time-cap are opt-in.
-  // Plain JSON (numbers + one string) so a later save/resume feature can serialize it.
-  const wc = config.winConfig ?? {};
-  world.winConfig = {
-    mode: wc.mode ?? "elimination", // "elimination" | "domination"
-    dominationPct: wc.dominationPct ?? 0.6, // fraction of habitable bodies to hold
-    dominationSecs: wc.dominationSecs ?? 25, // continuous seconds at/above pct to win
-    timeLimitSecs: wc.timeLimitSecs ?? 0, // 0 = no time cap
-  };
+  world.winConfig = normalizeWinConfig(config.winConfig);
   // Normalize every player to have a harvestable seeds resource + a zeroed tech record.
   for (const p of world.players) {
     if (p.seeds === undefined) p.seeds = STARTING_SEEDS;
@@ -234,9 +242,11 @@ export function killSeedling(world, i) {
 // Trees/Ai calls between updateSeedlings and tick++.
 export function step(world, dt) {
   const s = world.seed;
-  // Snapshot positions for render interpolation.
-  s.px.set(s.x.subarray(0, s.count));
-  s.py.set(s.y.subarray(0, s.count));
+  // Snapshot positions for render interpolation (allocation-free — subarray would alloc a view).
+  for (let i = 0; i < s.count; i++) {
+    s.px[i] = s.x[i];
+    s.py[i] = s.y[i];
+  }
   updateOrbits(world, dt); // move orbiting bodies first so riders read fresh positions
   updateAi(world, dt); // AI issues commands that take effect through the pipeline below
   updateRally(world, dt); // rallied rocks funnel their orbiting fighters to the anchor
@@ -263,9 +273,17 @@ function destroyInBlackHoles(world) {
   const s = world.seed;
   for (let i = s.count - 1; i >= 0; i--) {
     for (const h of holes) {
+      const rr = h.radius + BLACKHOLE_KILL_PAD;
+      // Cheap bounding-box reject so the squared-distance multiply only runs near a hole.
+      if (
+        s.x[i] < h.x - rr ||
+        s.x[i] > h.x + rr ||
+        s.y[i] < h.y - rr ||
+        s.y[i] > h.y + rr
+      )
+        continue;
       const dx = s.x[i] - h.x;
       const dy = s.y[i] - h.y;
-      const rr = h.radius + BLACKHOLE_KILL_PAD;
       if (dx * dx + dy * dy <= rr * rr) {
         killSeedling(world, i);
         break;
