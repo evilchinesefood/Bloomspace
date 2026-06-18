@@ -33,11 +33,16 @@ export function initStats(world) {
 
 // stepStats — called at end of every step(). Reads events + periodically samples
 // territory/fleet. Writes ONLY to world.stats/history — zero gameplay mutation.
-export function stepStats(world) {
+// Scans ONLY the events emitted during THIS step ([from, e.n)). The render channel is
+// drained (n reset) once per FRAME, not per step, so when several steps run in one frame
+// (Main.js's fixed-step loop) the buffer accumulates across them — scanning [0, e.n) would
+// re-count earlier steps' captures/deaths on every later step (frame-rate-dependent inflation).
+// `from` is events.n captured at the top of step() before any system emitted.
+export function stepStats(world, from = 0) {
   const { stats, history, players } = world;
   if (!stats) return;
   const e = world.events;
-  for (let k = 0; k < e.n; k++) {
+  for (let k = from; k < e.n; k++) {
     const t = e.type[k],
       o = e.owner[k];
     if (t === EVENT.CAPTURE && o >= 0 && o < players.length)
@@ -338,6 +343,10 @@ export function killSeedling(world, i) {
 // Trees/Ai calls between updateSeedlings and tick++.
 export function step(world, dt) {
   const s = world.seed;
+  // Event-buffer mark BEFORE any system emits this step. The channel is drained per FRAME (by
+  // render), not per step, so stepStats must only count events appended during THIS step — pass
+  // the mark so it scans [eventsFrom, e.n) and doesn't re-count earlier steps in a multi-step frame.
+  const eventsFrom = world.events.n;
   // Snapshot positions for render interpolation (allocation-free — subarray would alloc a view).
   for (let i = 0; i < s.count; i++) {
     s.px[i] = s.x[i];
@@ -359,7 +368,7 @@ export function step(world, dt) {
   if (world.fogOn && world.tick % FOG_TICKS === 0) computeFog(world);
   checkVictory(world);
   world.tick++;
-  stepStats(world);
+  stepStats(world, eventsFrom);
 }
 
 // Black holes destroy any seedling that enters their orbit. Iterate backwards because

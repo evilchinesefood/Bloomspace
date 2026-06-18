@@ -1,7 +1,14 @@
 // Sim/Stats.test.js — post-game stats accumulator: determinism, bounds, totals, save/resume.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createWorld, step, MAX_SAMPLES, EVENT, pushEvent } from "./World.js";
+import {
+  createWorld,
+  step,
+  stepStats,
+  MAX_SAMPLES,
+  EVENT,
+  pushEvent,
+} from "./World.js";
 import { serialize, deserialize } from "./Save.js";
 
 const DT = 1 / 30;
@@ -86,16 +93,13 @@ test("captures counter increments on EVENT.CAPTURE", () => {
   pushEvent(w, EVENT.CAPTURE, 0, 0, 0);
   pushEvent(w, EVENT.CAPTURE, 0, 0, 0);
   pushEvent(w, EVENT.CAPTURE, 0, 0, 1);
-  // stepStats reads events — call it via one step (tick++, then stepStats runs).
-  // But we need to avoid clearing world.events.n between push and step. Instead,
-  // replicate the real call path: step() calls stepStats at the end after tick++.
-  // Inject events, then step once; stepStats will process them.
-  // However step() also calls updateSeedlings/AI etc which may reset events.n.
-  // Safer: directly verify by calling step after injecting — the events we pushed
-  // are already there at index 0..2; step() appends more but won't remove ours.
+  // stepStats scans only events appended during the current step ([from, e.n)), since the
+  // render channel is drained per-frame not per-step (see World.stepStats). Drive it directly
+  // over the freshly-injected buffer (from=0) — routing through step() would mark the cursor
+  // AFTER our injection and (correctly) skip these pre-step events.
   const capBefore0 = w.stats.captures[0];
   const capBefore1 = w.stats.captures[1];
-  step(w, DT); // stepStats inside step() reads our injected events
+  stepStats(w, 0);
   // Our 3 injected events should have been counted.
   assert.ok(
     w.stats.captures[0] >= capBefore0 + 2,
@@ -114,10 +118,33 @@ test("deaths counter increments on EVENT.DEATH", () => {
   pushEvent(w, EVENT.DEATH, 0, 0, 0);
   pushEvent(w, EVENT.DEATH, 0, 0, 0);
   const before = w.stats.deaths[0];
-  step(w, DT);
+  stepStats(w, 0); // scan the injected buffer directly (see capture test above)
   assert.ok(
     w.stats.deaths[0] >= before + 2,
     "player 0 death count increased by 2+",
+  );
+});
+
+// Regression: the render event channel is drained per FRAME, not per step. When several steps
+// run before a drain (Main.js's fixed-step loop), the buffer accumulates across them. stepStats
+// must count each event ONCE — scanning the whole buffer every step would re-count earlier steps'
+// events, inflating totals frame-rate-dependently. A single CAPTURE must stay 1 across N steps.
+test("stepStats counts each event once across a multi-step frame (no drain between)", () => {
+  const w = mk(9);
+  w.stats.captures[0] = 0;
+  w.events.n = 0;
+  // Step 1 emits a capture (modelled: push, then count it via stepStats with the step's start
+  // cursor 0) → +1. The event STAYS in the buffer (render drains per frame, not per step).
+  pushEvent(w, EVENT.CAPTURE, 0, 0, 0);
+  stepStats(w, 0);
+  assert.equal(w.stats.captures[0], 1);
+  // Steps 2..5 run with the event still resident (no drain). Each marks its own start cursor at
+  // events.n, so none re-counts step 1's capture. Without the cursor this would reach 5.
+  for (let i = 0; i < 4; i++) step(w, DT);
+  assert.equal(
+    w.stats.captures[0],
+    1,
+    "one capture must count exactly once regardless of steps-per-frame",
   );
 });
 
