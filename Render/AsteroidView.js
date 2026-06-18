@@ -477,6 +477,60 @@ export function createAsteroidView(scene, world, camCtl, fx) {
     scene.add(richGlint);
   }
 
+  // --- Decorative meteor debris (cosmetic, render-only): a small cluster of tiny rocks
+  //     drifting around each asteroid/planet. NO gameplay effect — purely for looks. Layout is
+  //     seeded per body (stable across reloads); a slow per-fragment orbital drift gives it life.
+  //     Fog-aware in updateMeteors (hidden on never-seen bodies so it can't leak their position).
+  const metBody = [];
+  const metAng = [];
+  const metRad = [];
+  const metSize = [];
+  const metDrift = [];
+  const metShade = [];
+  for (let i = 0; i < n; i++) {
+    const a = rocks[i];
+    if (a.kind !== "asteroid" && a.kind !== "planet") continue; // skip star / black hole
+    const r = rngFrom((a.seed || a.id + 1) ^ 0x9e37);
+    const count = 2 + Math.floor(r() * 5); // 2..6 fragments per body
+    for (let k = 0; k < count; k++) {
+      metBody.push(i);
+      metAng.push(r() * Math.PI * 2);
+      metRad.push(a.radius * (1.15 + r() * 0.65)); // hover just outside the rim
+      metSize.push(Math.max(1.8, a.radius * (0.05 + r() * 0.07)));
+      metDrift.push((r() - 0.5) * 0.18); // slow orbit, mixed directions
+      metShade.push(0.62 + r() * 0.38);
+    }
+  }
+  const metN = metBody.length;
+  let meteors = null;
+  if (metN) {
+    meteors = new THREE.InstancedMesh(
+      new THREE.CircleGeometry(1, 6), // low-poly chunky rock
+      new THREE.MeshBasicMaterial({
+        color: 0x9a958c, // dusty rock grey
+        transparent: true,
+        opacity: 0.72,
+        depthWrite: false,
+        vertexColors: true,
+      }),
+      metN,
+    );
+    meteors.frustumCulled = false;
+    meteors.position.z = -1.95; // around the body, under the rim / seedlings
+    meteors.instanceColor = new THREE.InstancedBufferAttribute(
+      new Float32Array(metN * 3),
+      3,
+    );
+    const mc = new THREE.Color();
+    for (let k = 0; k < metN; k++) {
+      const sh = metShade[k];
+      mc.setRGB(sh, sh * 0.97, sh * 0.9);
+      meteors.setColorAt(k, mc);
+    }
+    meteors.instanceColor.needsUpdate = true;
+    scene.add(meteors);
+  }
+
   for (let i = 0; i < n; i++) {
     const a = rocks[i];
     const rnd = rngFrom(a.seed || a.id + 1);
@@ -918,6 +972,33 @@ export function createAsteroidView(scene, world, camCtl, fx) {
     updateRally();
     updateBattery();
     updateBeams();
+    updateMeteors();
+  }
+
+  // updateMeteors — drift the decorative debris clusters around their bodies (cosmetic only).
+  // Follows moving bodies, hides debris of dead bodies, and (under fog) hides debris on never-seen
+  // bodies so a cluster can't betray a hidden rock's location.
+  function updateMeteors() {
+    if (!meteors) return;
+    for (let k = 0; k < metN; k++) {
+      const bi = metBody[k];
+      const a = rocks[bi];
+      if (a.dead || (world.fogOn && fogState(world, bi) === 0)) {
+        dummy.position.set(0, 0, 0);
+        dummy.scale.set(0, 0, 0);
+        dummy.updateMatrix();
+        meteors.setMatrixAt(k, dummy.matrix);
+        continue;
+      }
+      const ang = reducedMotion ? metAng[k] : metAng[k] + clock * metDrift[k];
+      const rr = metRad[k];
+      dummy.position.set(a.x + Math.cos(ang) * rr, a.y + Math.sin(ang) * rr, 0);
+      const s = metSize[k];
+      dummy.scale.set(s, s, 1);
+      dummy.updateMatrix();
+      meteors.setMatrixAt(k, dummy.matrix);
+    }
+    meteors.instanceMatrix.needsUpdate = true;
   }
 
   // updateBattery — pulsing ring on every armed/charging live battery. Armed = steady menacing
