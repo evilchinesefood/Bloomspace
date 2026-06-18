@@ -10,6 +10,7 @@ import { updateAi, checkVictory, PERSONALITY_NAMES } from "./Ai.js";
 import { updateBombard } from "./Bombard.js";
 import { initPlayerTech } from "./Tech.js";
 import { initHazards, stepHazards } from "./Hazards.js";
+import { initFog, computeFog, FOG_TICKS } from "./Fog.js";
 
 export const STARTING_SEEDS = 10;
 
@@ -257,6 +258,12 @@ export function createWorld(config = {}) {
   // here) for an existing world. The flag rides the world for save/resume + the step() gate.
   world.hazardsOn = !!config.events;
   if (world.hazardsOn) initHazards(world);
+  // Fog of war: opt-in via config.fog. Default OFF so absent config drifts zero bits — initFog is
+  // rng-free, but with fog OFF NO fog state is allocated and step() never calls computeFog, so the
+  // world is byte-identical to a pre-fog one (existing tests/saves unaffected). When ON, per-player
+  // visibility rides world.fog (save/resume); the AI reads ownership through knownOwner.
+  world.fogOn = !!config.fog;
+  if (world.fogOn) initFog(world);
   initStats(world);
   return world;
 }
@@ -346,6 +353,10 @@ export function step(world, dt) {
   updateTrees(world, dt);
   updateBombard(world, dt); // advance battery charges / destroy bodies, before victory check
   if (world.hazardsOn) stepHazards(world, dt); // env hazards damage fleets before victory check
+  // Fog of war: recompute per-player visibility AFTER all movement/combat (positions are final),
+  // throttled to every FOG_TICKS ticks (deterministic, tick-based) — AI/render read the cache in
+  // between. Gated on fogOn so the OFF path runs zero fog code. initFog already computed tick 0.
+  if (world.fogOn && world.tick % FOG_TICKS === 0) computeFog(world);
   checkVictory(world);
   world.tick++;
   stepStats(world);

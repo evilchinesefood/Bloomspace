@@ -94,6 +94,14 @@ export function createSeedlingView(scene, world, camCtl) {
         y = lerp(s.py[i], s.y[i], alpha);
       }
       if (x < minX || x > maxX || y < minY || y > maxY) continue;
+      // Fog of war: hide ENEMY (non-human) seedlings the human can't currently see. A ship is
+      // "seen" if its home rock is currently seen by player 0 (the rock-based vision model). Own
+      // ships (owner 0) always show; with fog off this whole branch is skipped.
+      if (world.fogOn && world.fog && s.owner[i] !== 0) {
+        const h = s.home[i];
+        if (h < 0 || h >= world.fog.seen[0].length || !world.fog.seen[0][h])
+          continue;
+      }
       // Orient along motion (orbit tangent or transit heading); idle ships point up.
       let rot = 0;
       if (!teleport && ddx * ddx + ddy * ddy > 0.0004)

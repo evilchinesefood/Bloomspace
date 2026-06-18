@@ -5,6 +5,20 @@
 // the live viewport rectangle tracks the main camera; click/drag re-centers the camera.
 // Throttled to ~30 Hz so it costs nothing on top of the render loop.
 import { ownerColorHex } from "./Palette.js";
+import { UNKNOWN } from "../Sim/Fog.js";
+
+// Fog render state for the human (player 0) on rock r: 2 seen · 1 remembered · 0 never-explored.
+// 2 always when fog is off (minimap unchanged in that mode).
+function fogState(world, r) {
+  if (!world.fogOn || !world.fog) return 2;
+  if (world.fog.seen[0][r]) return 2;
+  return world.fog.known[0][r] === UNKNOWN ? 0 : 1;
+}
+function fogOwner(world, r, trueOwner) {
+  if (!world.fogOn || !world.fog) return trueOwner;
+  if (world.fog.seen[0][r]) return trueOwner;
+  return world.fog.known[0][r];
+}
 
 const SIZE = 180; // long-edge px of the panel (short edge scales by map aspect)
 const PAD = 6; // inner padding (px) so dots/rect don't kiss the border
@@ -126,6 +140,14 @@ export function createMinimap(root, getWorld, camera) {
 
     for (const a of world.asteroids) {
       if (a.dead) continue; // destroyed bodies vanish from the overview
+      // Fog of war: a never-explored body is omitted; a remembered one is drawn dimmed with its
+      // last-known owner color; a seen one renders normally. (fs===2 / fullAlpha when fog is off.)
+      const fs = fogState(world, a.id);
+      if (fs === 0) continue;
+      const fade = fs === 1 ? 0.4 : 1;
+      // Dim a remembered body so it reads as stale — applied to EVERY body kind (incl. the
+      // star/blackhole hub marker), then reset to 1 before leaving each branch.
+      ctx.globalAlpha = fade;
       const p = worldToMap(a.x, a.y);
       const r = dotRadius(a.radius || 0);
       if (a.kind === "star" || a.kind === "blackhole") {
@@ -144,12 +166,14 @@ export function createMinimap(root, getWorld, camera) {
             : "rgba(255,210,120,.9)";
         ctx.lineWidth = 1;
         ctx.stroke();
+        ctx.globalAlpha = 1;
         continue;
       }
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = css(ownerColorHex(a.owner));
+      ctx.fillStyle = css(ownerColorHex(fogOwner(world, a.id, a.owner)));
       ctx.fill();
+      ctx.globalAlpha = 1;
     }
 
     // Viewport rectangle: map the visible world rect's corners into minimap px (the y flip

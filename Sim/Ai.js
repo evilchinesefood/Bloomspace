@@ -18,6 +18,7 @@ import {
   BOMBARD_ENERGY_COST,
 } from "./Bombard.js";
 import { buyTech, techCost, TECH_TRACKS, MAX_TIER } from "./Tech.js";
+import { knownOwner, UNKNOWN } from "./Fog.js";
 
 // Difficulty knobs. 0 Easy · 1 Normal · 2 Hard · 3 Brutal. Higher = decides faster, commits
 // more orbiters, and presses attacks harder. Normal and up DEVELOP (plant trees); Easy never
@@ -191,6 +192,24 @@ const dist2 = (a, b) => {
   return dx * dx + dy * dy;
 };
 
+// --- Passive-blind fog reads (gated on world.fogOn) --------------------------------------------
+// Under fog the AI acts ONLY on what it currently sees + last-known memory: it never considers a
+// rock it has no knowledge of, and it reads a rock's owner as its LAST-KNOWN owner (possibly stale)
+// rather than the true current owner. When fog is OFF both helpers collapse to the true owner / full
+// knowledge, so the AI code path is exactly as before (the OFF path consumes no fog state at all).
+
+// True if the AI `id` may consider rock `a` as a target: always when fog is off; under fog only
+// when it has knowledge of the rock (seen now or remembered).
+function aiKnows(world, id, a) {
+  if (!world.fogOn) return true;
+  return knownOwner(world, id, a.id) !== UNKNOWN;
+}
+// The owner of rock `a` as the AI `id` perceives it: true owner when fog is off; under fog the
+// last-known owner (stale if currently unseen).
+function aiOwner(world, id, a) {
+  return world.fogOn ? knownOwner(world, id, a.id) : a.owner;
+}
+
 // Nearest asteroid to `from` matching pred; rng breaks exact ties deterministically.
 function nearestMatch(world, from, pred) {
   const asts = world.asteroids;
@@ -276,13 +295,16 @@ function orbitersAt(world, rockId) {
   return n;
 }
 
-// True if any neighbor of `rock` is held by a live enemy of `id`.
+// True if any neighbor of `rock` is held by a live enemy of `id`. Under fog this reads each
+// neighbor's LAST-KNOWN owner (aiOwner): an unknown neighbor is treated as not-an-enemy (the AI
+// can't know it's hostile), and a stale-known enemy still counts (the AI plays safe on memory).
 function hasEnemyNeighbor(world, rock, id) {
   const asts = world.asteroids;
   for (const nb of rock.neighbors || []) {
     const a = asts[nb];
-    if (a && !a.dead && a.owner !== OWNER_NEUTRAL && a.owner !== id)
-      return true;
+    if (!a || a.dead) continue;
+    const o = aiOwner(world, id, a);
+    if (o !== OWNER_NEUTRAL && o !== UNKNOWN && o !== id) return true;
   }
   return false;
 }
@@ -465,11 +487,22 @@ function decide(world, player) {
   // that already holds a base of rocks — as extra opportunistic pressure. This keeps higher
   // difficulty strictly stronger: it expands at least as readily AND fights, rather than
   // trading expansion away for early long-range raids.
-  const neutral = nearestMatch(world, from, (a) => a.owner === OWNER_NEUTRAL);
+  // Target predicates read the AI's PERCEIVED ownership (true owner when fog is off; last-known
+  // when on) and, under fog, only consider rocks the AI has knowledge of — it never targets a rock
+  // it has never seen. A known-but-stale rock is judged by its last-known owner (so the AI may, by
+  // design, strike a rock it last saw weakly held even if it has since changed hands).
+  const neutral = nearestMatch(
+    world,
+    from,
+    (a) => aiKnows(world, id, a) && aiOwner(world, id, a) === OWNER_NEUTRAL,
+  );
   const enemy = nearestMatch(
     world,
     from,
-    (a) => a.owner !== id && a.owner !== OWNER_NEUTRAL,
+    (a) =>
+      aiKnows(world, id, a) &&
+      aiOwner(world, id, a) !== id &&
+      aiOwner(world, id, a) !== OWNER_NEUTRAL,
   );
 
   let target = neutral;

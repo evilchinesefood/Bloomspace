@@ -330,6 +330,13 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     checked: true,
   });
 
+  // Fog of war toggle. Default OFF — fog is a significant mode change (last-known visibility +
+  // blind AI), so it's opt-in; the sim also defaults OFF when config.fog is absent.
+  const fogSwitch = el("wa-switch", {
+    textContent: "Fog of war",
+    checked: false,
+  });
+
   // Map size preset nudges the default asteroid count AND clamps the slider's max to a count
   // the chosen map can actually fit (rejection sampling caps placement far below big requests:
   // ~16 small / ~36 medium / 60 large). Keeps the request honest with no MapGen change.
@@ -352,6 +359,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     field(winSel),
     field(timeSel),
     field(eventsSwitch),
+    field(fogSwitch),
   );
 
   const cancelBtn = el("wa-button", {
@@ -404,6 +412,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
       aiPersonality,
       specials: true, // terrain specials (rich rocks + nebulae) on for every started match
       events: eventsSwitch.checked !== false, // environmental hazards (flares + meteors)
+      fog: fogSwitch.checked === true, // fog of war (last-known visibility + blind AI), opt-in
       winConfig: { mode, timeLimitSecs },
     });
   });
@@ -421,6 +430,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     timeSel.value = "0";
     layoutSel.value = "scatter";
     eventsSwitch.checked = true;
+    fogSwitch.checked = false;
     applySizeToSlider(); // clamp slider max to the (medium) default size
   };
   if (window.customElements && customElements.whenDefined) {

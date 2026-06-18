@@ -48,6 +48,7 @@ const SHELL = [
   "Sim/Ai.js",
   "Sim/Save.js",
   "Sim/Hazards.js",
+  "Sim/Fog.js",
   "Render/Scene.js",
   "Render/SeedlingView.js",
   "Render/AsteroidView.js",

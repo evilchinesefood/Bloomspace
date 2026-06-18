@@ -84,6 +84,17 @@ export function serialize(world) {
     // meteors) — plain numbers/arrays so a mid-shower save resumes identically. Absent ⇒ off.
     hazardsOn: !!world.hazardsOn,
     hazards: world.hazards ? cloneJson(world.hazards) : null,
+    // Fog of war: the on/off flag + per-player visibility (seen + last-known owner memory). The
+    // typed arrays serialize as plain number arrays (like the seed SoA) and rebuild into typed
+    // arrays on restore. Known memory MUST persist so a resumed match remembers what it had seen.
+    // Absent ⇒ fog off (old saves restore with no fog state).
+    fogOn: !!world.fogOn,
+    fog: world.fog
+      ? {
+          seen: world.fog.seen.map((a) => Array.from(a)),
+          known: world.fog.known.map((a) => Array.from(a)),
+        }
+      : null,
     // Post-game stats accumulator + territory history. Plain arrays — omitted in old saves,
     // initialized empty on restore (initStats).
     stats: world.stats ? cloneJson(world.stats) : null,
@@ -170,7 +181,19 @@ export function deserialize(saved) {
     // stepHazards never runs (step() gates on hazardsOn) — byte-identical to a pre-hazards world.
     hazardsOn: !!saved.hazardsOn,
     hazards: saved.hazards ? cloneJson(saved.hazards) : null,
+    // Fog of war flag — an old save without it restores OFF (no world.fog, computeFog never runs;
+    // step() gates on fogOn), byte-identical to a pre-fog world.
+    fogOn: !!saved.fogOn,
   };
+  // Fog state: only attach world.fog when the save carried it (fog ON). Rebuild the per-player
+  // typed arrays from the plain number arrays (Uint8 seen / Int8 known) so the last-known memory
+  // resumes exactly. An old/off save leaves world.fog absent (undefined).
+  if (saved.fogOn && saved.fog) {
+    world.fog = {
+      seen: saved.fog.seen.map((a) => Uint8Array.from(a)),
+      known: saved.fog.known.map((a) => Int8Array.from(a)),
+    };
+  }
   // Stats + history: restore if present, else initialize empty (old saves).
   if (saved.stats && saved.history) {
     world.stats = cloneJson(saved.stats);

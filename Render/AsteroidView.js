@@ -8,6 +8,23 @@ import { ownerColor, ownerColorHex } from "./Palette.js";
 import { lodActive } from "./SeedlingView.js";
 import { CHARGE_TICKS } from "../Sim/Bombard.js";
 import { STATE, MAX_PLAYERS } from "../Sim/World.js";
+import { UNKNOWN } from "../Sim/Fog.js";
+
+// Fog-of-war render state for the human (player 0), per rock:
+//   2 visible (seen now) · 1 remembered (known but not currently seen) · 0 hidden (never explored).
+// Returns 2 always when fog is off, so the whole render path is unchanged in that mode.
+const FOG_HUMAN = 0;
+function fogState(world, r) {
+  if (!world.fogOn || !world.fog) return 2;
+  if (world.fog.seen[FOG_HUMAN][r]) return 2;
+  return world.fog.known[FOG_HUMAN][r] === UNKNOWN ? 0 : 1;
+}
+// The owner the human PERCEIVES for rock r: true owner when seen/no-fog, last-known when remembered.
+function fogOwner(world, r, trueOwner) {
+  if (!world.fogOn || !world.fog) return trueOwner;
+  if (world.fog.seen[FOG_HUMAN][r]) return trueOwner;
+  return world.fog.known[FOG_HUMAN][r];
+}
 
 // Small seeded PRNG so each planet's look is unique but stable.
 function rngFrom(seed) {
@@ -334,6 +351,10 @@ export function createAsteroidView(scene, world, camCtl, fx) {
   const dummy = new THREE.Object3D();
   const col = new THREE.Color();
   const lastOwner = new Int32Array(n).fill(-99);
+  // Fog render caches: lastFog gates the rim recolor; fogApplied gates the body/rim MASK pass — each
+  // only rewrites an instance when a rock's visibility actually changes, not every frame. -9 = unset.
+  const lastFog = new Int8Array(n).fill(-9);
+  const fogApplied = new Int8Array(n).fill(-9);
 
   // Per-body THREE.Mesh refs for non-instanced bodies (planets, star, blackhole) + their halos,
   // keyed by id, so a destroyed body can be hidden (asteroids hide via their instanced matrix).
@@ -841,15 +862,24 @@ export function createAsteroidView(scene, world, camCtl, fx) {
     let dirty = false;
     for (let i = 0; i < n; i++) {
       if (rocks[i].dead) continue; // dead rim is hidden (zero-scaled), don't recolor it
-      const o = rocks[i].owner;
-      if (o !== lastOwner[i]) {
+      // Under fog the rim shows the human's PERCEIVED owner (last-known when remembered); a
+      // remembered rim is dimmed so it reads as stale. Visible/no-fog rims are full-bright truth.
+      // Recolor on a change in perceived owner OR fog state (so the dim toggles on re-seeing).
+      const o = fogOwner(world, i, rocks[i].owner);
+      const fs = world.fogOn ? fogState(world, i) : 2;
+      if (o !== lastOwner[i] || fs !== lastFog[i]) {
         ownerColor(col, o);
+        if (fs === 1) col.multiplyScalar(0.45);
         rims.setColorAt(i, col);
         lastOwner[i] = o;
+        lastFog[i] = fs;
         dirty = true;
       }
     }
     if (dirty && rims.instanceColor) rims.instanceColor.needsUpdate = true;
+
+    // Fog masking: hide bodies/rims for never-explored rocks, restore them when they become known.
+    if (world.fogOn) updateFogMask();
 
     // One-shot hide for bodies that just died (must run before moving-body rewrites so a dead
     // moon's rim isn't re-shown). Reads lastOwner above for the explosion tint.
@@ -982,6 +1012,69 @@ export function createAsteroidView(scene, world, camCtl, fx) {
     beam.visible = true;
   }
 
+  // updateFogMask — apply the human's fog visibility to each non-dead body. Never-explored rocks
+  // (state 0) are fully hidden (body/halo/rock-instance/rim zero-scaled); remembered rocks (state
+  // 1) show a dimmed body (last-known); visible rocks (state 2) render normally. Driven off lastFog
+  // (set in the rim loop just before this) so it only touches an instance when state changes — a
+  // static fog frame costs one cheap scan. Only called when world.fogOn.
+  function updateFogMask() {
+    let rockDirty = false;
+    let rimDirty = false;
+    for (let i = 0; i < n; i++) {
+      const a = rocks[i];
+      if (a.dead) continue; // dead bodies are hidden by processDeaths; fog never re-shows them
+      // Reuse the fog state the rim loop just computed into lastFog[i] (it runs first, every frame,
+      // writing every non-dead rock) instead of recomputing fogState here.
+      const fs = lastFog[i];
+      // Re-mask only when this rock's state changed (or a visible moving body, whose transform the
+      // moving-body pass rewrites each frame — its mask must follow). Static unchanged rocks: skip.
+      if (fs === fogApplied[i] && !(fs !== 0 && a.orbiting)) continue;
+      fogApplied[i] = fs;
+      const visible = fs !== 0;
+      const dim = fs === 1;
+      // Planet / star / blackhole meshes: toggle visibility + dim the remembered ones.
+      const bm = bodyMesh[i];
+      if (bm) {
+        bm.visible = visible;
+        if (bm.material) {
+          bm.material.transparent = dim || bm.material.transparent;
+          bm.material.opacity = dim ? 0.4 : 1;
+        }
+        if (bodyHalo[i]) bodyHalo[i].visible = visible;
+      }
+      // Asteroid rock-mesh instance: zero-scale when hidden, restore the real matrix otherwise.
+      if (rockLi[i] >= 0) {
+        if (!visible) {
+          dummy.position.set(0, 0, -2);
+          dummy.scale.set(0, 0, 0);
+        } else {
+          dummy.position.set(a.x, a.y, -2);
+          dummy.scale.set(a.radius, a.radius, 1);
+        }
+        dummy.updateMatrix();
+        rockMesh.setMatrixAt(rockLi[i], dummy.matrix);
+        rockDirty = true;
+      }
+      // Rim instance: zero-scale a hidden rock's rim (color already set in the rim loop).
+      if (!visible) {
+        dummy.position.set(0, 0, -1.9);
+        dummy.scale.set(0, 0, 0);
+        dummy.updateMatrix();
+        rims.setMatrixAt(i, dummy.matrix);
+        rimDirty = true;
+      } else if (!a.orbiting) {
+        // Restore a static rock's rim transform (moving rims are rewritten every frame anyway).
+        dummy.position.set(a.x, a.y, -1.9);
+        dummy.scale.set(a.radius, a.radius, 1);
+        dummy.updateMatrix();
+        rims.setMatrixAt(i, dummy.matrix);
+        rimDirty = true;
+      }
+    }
+    if (rockDirty) rockMesh.instanceMatrix.needsUpdate = true;
+    if (rimDirty) rims.instanceMatrix.needsUpdate = true;
+  }
+
   function updateGlow() {
     if (!lodActive(camCtl)) {
       if (glow.count !== 0) glow.count = 0;
@@ -1005,8 +1098,9 @@ export function createAsteroidView(scene, world, camCtl, fx) {
     }
     for (let i = 0; i < n; i++) {
       const a = rocks[i];
-      if (a.dead) {
-        // Destroyed body emits no glow — zero-scale its instance out of view.
+      // A destroyed body, OR (under fog) a rock the human can't currently SEE, emits no aggregate
+      // glow — the orbiter count is live intel the human shouldn't read on a remembered/dark rock.
+      if (a.dead || (world.fogOn && fogState(world, i) !== 2)) {
         dummy.position.set(0, 0, 0);
         dummy.scale.set(0, 0, 0);
         dummy.updateMatrix();
@@ -1041,6 +1135,7 @@ export function createAsteroidView(scene, world, camCtl, fx) {
     for (let i = 0; i < n; i++) {
       const a = rocks[i];
       if (a.dead) continue;
+      if (world.fogOn && fogState(world, i) !== 2) continue; // contest is live intel — seen only
       const base = i * OWN;
       // Find top-2 owners by strength.
       let o0 = -1,
