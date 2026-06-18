@@ -289,7 +289,12 @@ export function createApp(root) {
     // finished TUTORIAL must leave the player's real in-progress save untouched (the tutorial never
     // wrote it, and clearing here would wipe a real match the player paused to try the tutorial).
     if (!isTutorial) clearSave();
-    closeOverlay = showGameOver(root, status, { onNewGame: toMenu });
+    closeOverlay = showGameOver(root, status, {
+      onNewGame: toMenu,
+      stats: game.world.stats ?? null,
+      history: game.world.history ?? null,
+      players: game.world.players ?? null,
+    });
   }
 
   // --- Loop hooks (called by Main.js) ---------------------------------------

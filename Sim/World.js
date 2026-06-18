@@ -13,6 +13,62 @@ import { initHazards, stepHazards } from "./Hazards.js";
 
 export const STARTING_SEEDS = 10;
 
+// Stats accumulator — samples per this many ticks (~1 s at 30 fps).
+const SAMPLE_TICKS = 30;
+// Hard cap on history length; when full, downsamples to stay bounded.
+export const MAX_SAMPLES = 240;
+
+// initStats — attach fresh stats + history to a world. Called in createWorld and
+// also used by deserialize when restoring an old save that lacks them.
+export function initStats(world) {
+  const n = world.players.length;
+  world.stats = {
+    captures: new Array(n).fill(0),
+    deaths: new Array(n).fill(0),
+    peakFleet: new Array(n).fill(0),
+  };
+  world.history = [];
+}
+
+// stepStats — called at end of every step(). Reads events + periodically samples
+// territory/fleet. Writes ONLY to world.stats/history — zero gameplay mutation.
+export function stepStats(world) {
+  const { stats, history, players } = world;
+  if (!stats) return;
+  const e = world.events;
+  for (let k = 0; k < e.n; k++) {
+    const t = e.type[k],
+      o = e.owner[k];
+    if (t === EVENT.CAPTURE && o >= 0 && o < players.length)
+      stats.captures[o]++;
+    if (t === EVENT.DEATH && o >= 0 && o < players.length) stats.deaths[o]++;
+  }
+  if (world.tick % SAMPLE_TICKS !== 0) return;
+  const n = players.length;
+  // Territory: non-dead owned rocks per player.
+  const terr = new Array(n).fill(0);
+  for (const a of world.asteroids) {
+    if (!a.dead && a.owner >= 0 && a.owner < n) terr[a.owner]++;
+  }
+  // Fleet: live seedlings per player.
+  const s = world.seed;
+  const fleet = new Array(n).fill(0);
+  for (let i = 0; i < s.count; i++) {
+    const o = s.owner[i];
+    if (o >= 0 && o < n) fleet[o]++;
+  }
+  for (let i = 0; i < n; i++)
+    if (fleet[i] > stats.peakFleet[i]) stats.peakFleet[i] = fleet[i];
+  // Bounded history: when at cap, drop every odd entry (halves length, doubles interval).
+  if (history.length >= MAX_SAMPLES) {
+    const keep = [];
+    for (let i = 0; i < history.length; i += 2) keep.push(history[i]);
+    history.length = 0;
+    history.push(...keep);
+  }
+  history.push({ tick: world.tick, terr: terr.slice() });
+}
+
 // Owners:        -1 neutral, 0 human, 1..N AI
 // Seedling state: 0 ORBIT, 1 TRANSIT, 2 COMBAT, 3 DEAD, 4 SLING (partial slingshot orbit
 // around a body it's passing — fights any ships stationed there during the arc).
@@ -201,6 +257,7 @@ export function createWorld(config = {}) {
   // here) for an existing world. The flag rides the world for save/resume + the step() gate.
   world.hazardsOn = !!config.events;
   if (world.hazardsOn) initHazards(world);
+  initStats(world);
   return world;
 }
 
@@ -291,6 +348,7 @@ export function step(world, dt) {
   if (world.hazardsOn) stepHazards(world, dt); // env hazards damage fleets before victory check
   checkVictory(world);
   world.tick++;
+  stepStats(world);
 }
 
 // Black holes destroy any seedling that enters their orbit. Iterate backwards because

@@ -21,6 +21,7 @@ import {
   normalizeWinConfig,
   SEED_FIELDS,
   WORLD_STATUS,
+  initStats,
 } from "./World.js";
 import { rebuildNav } from "./MapGen.js";
 
@@ -83,6 +84,10 @@ export function serialize(world) {
     // meteors) — plain numbers/arrays so a mid-shower save resumes identically. Absent ⇒ off.
     hazardsOn: !!world.hazardsOn,
     hazards: world.hazards ? cloneJson(world.hazards) : null,
+    // Post-game stats accumulator + territory history. Plain arrays — omitted in old saves,
+    // initialized empty on restore (initStats).
+    stats: world.stats ? cloneJson(world.stats) : null,
+    history: world.history ? cloneJson(world.history) : null,
   };
 }
 
@@ -166,6 +171,13 @@ export function deserialize(saved) {
     hazardsOn: !!saved.hazardsOn,
     hazards: saved.hazards ? cloneJson(saved.hazards) : null,
   };
+  // Stats + history: restore if present, else initialize empty (old saves).
+  if (saved.stats && saved.history) {
+    world.stats = cloneJson(saved.stats);
+    world.history = cloneJson(saved.history);
+  } else {
+    initStats(world);
+  }
 
   // world.nav is DERIVED from each body's restored .neighbors (the post-belt graph) — recompute
   // it so routing resumes identically without serializing the table.

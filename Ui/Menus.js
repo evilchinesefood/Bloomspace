@@ -451,13 +451,124 @@ const GAME_OVER_VARIANTS = {
     sub: "Time ran out with neither bloom in the lead.",
   },
 };
-export function showGameOver(root, status, { onNewGame }) {
+
+// Hex int → CSS "#rrggbb" string.
+function hexToCss(n) {
+  return "#" + (n >>> 0).toString(16).padStart(6, "0");
+}
+
+// Mirrors Render/Palette.js ownerColorHex — keep in sync; can't import Palette (pulls three.js).
+const P_COLORS = [
+  0x46e8ff, 0xff5a7a, 0x8a7bff, 0xffc24b, 0x5dff9b, 0xff8a3d, 0xff6bff,
+];
+function playerColor(id) {
+  return hexToCss(P_COLORS[id] ?? P_COLORS[P_COLORS.length - 1]);
+}
+
+// Inline SVG sparkline of territory over time. W×H in px. Returns an <svg> element or null
+// when history is empty.
+function sparkline(history, playerCount, w = 280, h = 72) {
+  if (!history || history.length < 2) return null;
+  const maxTerr = Math.max(1, ...history.map((s) => Math.max(...s.terr)));
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("width", w);
+  svg.setAttribute("height", h);
+  svg.style.cssText =
+    "display:block;margin:.75rem auto 0;border-radius:6px;background:rgba(255,255,255,.04);";
+  const n = history.length;
+  for (let p = 0; p < playerCount; p++) {
+    const pts = history.map((s, i) => {
+      const x = (i / (n - 1)) * w;
+      const y = h - (s.terr[p] / maxTerr) * (h - 4) - 2;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    const poly = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "polyline",
+    );
+    poly.setAttribute("points", pts.join(" "));
+    poly.setAttribute("fill", "none");
+    poly.setAttribute("stroke", playerColor(p));
+    poly.setAttribute("stroke-width", p === 0 ? "2" : "1.5");
+    poly.setAttribute("stroke-opacity", p === 0 ? "1" : "0.7");
+    svg.appendChild(poly);
+  }
+  return svg;
+}
+
+// totals block: peak fleet, captures, kills for the human player (id 0), then a compact
+// per-player row for AI opponents.
+function statsBlock(stats, players) {
+  if (!stats) return null;
+  const n = players.length;
+  // kills[p] ≈ sum of all opponent deaths (approximation — events don't record the killer).
+  const kills = players.map((_, p) => {
+    let k = 0;
+    for (let q = 0; q < n; q++) if (q !== p) k += stats.deaths[q];
+    return k;
+  });
+  const wrap = el("div", { style: "margin:.9rem 0 1.2rem;text-align:left;" });
+
+  // Human row — prominent.
+  const humanLabel = (key, val) =>
+    el(
+      "div",
+      {
+        style:
+          "display:flex;justify-content:space-between;padding:.18rem 0;font:400 .88rem system-ui;",
+      },
+      [
+        el("span", { style: "opacity:.65;", textContent: key }),
+        el("span", { style: "font-weight:600;", textContent: String(val) }),
+      ],
+    );
+  const humanBox = el("div", {
+    style: `border-left:3px solid ${playerColor(0)};padding:.3rem .6rem .3rem .7rem;margin-bottom:.55rem;`,
+  });
+  humanBox.append(
+    humanLabel("Peak fleet", stats.peakFleet[0]),
+    humanLabel("Captures", stats.captures[0]),
+    humanLabel("Kills", kills[0]),
+  );
+  wrap.append(humanBox);
+
+  // AI rows — compact, one line each.
+  if (n > 1) {
+    const aiWrap = el("div", {
+      style: "display:flex;flex-direction:column;gap:.2rem;",
+    });
+    for (let p = 1; p < n; p++) {
+      const row = el("div", {
+        style: `display:flex;align-items:center;gap:.5rem;font:400 .8rem system-ui;opacity:.8;
+border-left:2px solid ${playerColor(p)};padding-left:.5rem;`,
+      });
+      row.append(
+        el("span", { style: "flex:1;opacity:.6;", textContent: `AI ${p}` }),
+        el("span", { textContent: `fleet ${stats.peakFleet[p]}` }),
+        el("span", { style: "opacity:.5;", textContent: "·" }),
+        el("span", { textContent: `cap ${stats.captures[p]}` }),
+        el("span", { style: "opacity:.5;", textContent: "·" }),
+        el("span", { textContent: `kills ${kills[p]}` }),
+      );
+      aiWrap.append(row);
+    }
+    wrap.append(aiWrap);
+  }
+  return wrap;
+}
+
+export function showGameOver(
+  root,
+  status,
+  { onNewGame, stats = null, history = null, players = null },
+) {
   const v = GAME_OVER_VARIANTS[status] || GAME_OVER_VARIANTS.lost;
   const wrap = overlay();
   const card = el("wa-card", {
     role: "alert", // announce win/lose/draw the moment the screen appears
     style:
-      "pointer-events:auto;max-width:420px;width:90%;text-align:center;--padding:2rem;",
+      "pointer-events:auto;max-width:420px;width:90%;text-align:center;--padding:2rem;overflow-y:auto;max-height:92vh;",
   });
   card.append(
     el("i", {
@@ -469,10 +580,17 @@ export function showGameOver(root, status, { onNewGame }) {
       textContent: v.title,
     }),
     el("p", {
-      style: "margin:0 0 1.5rem;opacity:.75;font:400 .95rem system-ui;",
+      style: "margin:0 0 1rem;opacity:.75;font:400 .95rem system-ui;",
       textContent: v.sub,
     }),
   );
+  // Sparkline.
+  const spark = sparkline(history, players ? players.length : 1);
+  if (spark) card.append(spark);
+  // Totals.
+  const totals = statsBlock(stats, players || [{ id: 0 }]);
+  if (totals) card.append(totals);
+
   const btn = el("wa-button", {
     variant: "brand",
     size: "large",
