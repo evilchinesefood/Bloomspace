@@ -323,6 +323,13 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     }),
   ]);
 
+  // Environmental hazards toggle (solar flares + meteor showers). Default ON for visibility;
+  // the sim defaults OFF when config.events is absent (existing worlds/tests unaffected).
+  const eventsSwitch = el("wa-switch", {
+    textContent: "Environmental events",
+    checked: true,
+  });
+
   // Map size preset nudges the default asteroid count AND clamps the slider's max to a count
   // the chosen map can actually fit (rejection sampling caps placement far below big requests:
   // ~16 small / ~36 medium / 60 large). Keeps the request honest with no MapGen change.
@@ -344,6 +351,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     field(personalitySel),
     field(winSel),
     field(timeSel),
+    field(eventsSwitch),
   );
 
   const cancelBtn = el("wa-button", {
@@ -395,6 +403,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
       layout,
       aiPersonality,
       specials: true, // terrain specials (rich rocks + nebulae) on for every started match
+      events: eventsSwitch.checked !== false, // environmental hazards (flares + meteors)
       winConfig: { mode, timeLimitSecs },
     });
   });
@@ -411,6 +420,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     winSel.value = "elimination";
     timeSel.value = "0";
     layoutSel.value = "scatter";
+    eventsSwitch.checked = true;
     applySizeToSlider(); // clamp slider max to the (medium) default size
   };
   if (window.customElements && customElements.whenDefined) {

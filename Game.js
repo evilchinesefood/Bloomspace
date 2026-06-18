@@ -142,7 +142,15 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
         if (own === 0) sound.play("fire"); // bombardment battery fire-start
       } else if (type === EVENT.LOST)
         sound.play("alert"); // always; owner is 0 — guarded at emit site in Combat.flipOwnership
-      else if (type === EVENT.DESTROY) sound.play("explosion"); // body destroyed
+      else if (type === EVENT.DESTROY)
+        sound.play("explosion"); // body destroyed
+      else if (type === EVENT.FLARE) {
+        fx.spawnFlare(ev.x[k], ev.y[k]); // solar flare ring from the star — always (global)
+        sound.play("flare");
+      } else if (type === EVENT.METEOR) {
+        fx.spawnMeteor(ev.x[k], ev.y[k]); // meteor impact — always (global)
+        sound.play("meteor");
+      }
     }
     ev.n = 0;
     sound.endFrame(); // reset per-frame SFX throttle counters

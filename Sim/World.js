@@ -9,6 +9,7 @@ import { updateTrees } from "./Trees.js";
 import { updateAi, checkVictory, PERSONALITY_NAMES } from "./Ai.js";
 import { updateBombard } from "./Bombard.js";
 import { initPlayerTech } from "./Tech.js";
+import { initHazards, stepHazards } from "./Hazards.js";
 
 export const STARTING_SEEDS = 10;
 
@@ -43,6 +44,8 @@ export const EVENT = {
   LOSE: 5,
   LOST: 6, // player 0 lost a rock to an enemy (distinct alert cue)
   DESTROY: 7, // a celestial body was destroyed by bombardment
+  FLARE: 8, // solar flare ring fired from the star (global, owner -1)
+  METEOR: 9, // a meteor impact (global, owner -1)
 };
 
 // pushEvent — append one event to world.events (allocation-free). Silently drops when full,
@@ -192,6 +195,12 @@ export function createWorld(config = {}) {
       p.personality = PERSONALITY_NAMES[h];
     }
   }
+  // Environmental hazards: opt-in via config.events. Default OFF so absent config drifts zero
+  // bits (initHazards consumes world.rng()). When on, seed the hazard timers from the star map;
+  // initHazards runs LAST so the rng draws don't perturb mapgen/personality (which are rng-free
+  // here) for an existing world. The flag rides the world for save/resume + the step() gate.
+  world.hazardsOn = !!config.events;
+  if (world.hazardsOn) initHazards(world);
   return world;
 }
 
@@ -279,6 +288,7 @@ export function step(world, dt) {
   updateEconomy(world, dt);
   updateTrees(world, dt);
   updateBombard(world, dt); // advance battery charges / destroy bodies, before victory check
+  if (world.hazardsOn) stepHazards(world, dt); // env hazards damage fleets before victory check
   checkVictory(world);
   world.tick++;
 }

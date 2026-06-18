@@ -115,6 +115,28 @@ export function createFx(scene, world) {
     }
   }
 
+  // Solar flare: a wide outward ring of particles flung from the star, fast and longer-lived so
+  // it reads as an expanding shockwave (the sim damages a growing ring band over ~1.6s).
+  function spawnFlare(x, y, hex = 0xffd24a) {
+    const count = Math.max(10, Math.round(40 * COUNT_K));
+    for (let k = 0; k < count; k++) {
+      const a = (k / count) * TAU;
+      const sp = (260 + Math.random() * 120) * SPEED_K;
+      emit(x, y, Math.cos(a), Math.sin(a), sp, 1.4 * LIFE_K, hex);
+    }
+  }
+
+  // Meteor impact: a compact, hot directional-ish burst at the strike point (reuses the
+  // explosion shell tuning, smaller, so a shower of impacts doesn't drown the field).
+  function spawnMeteor(x, y, hex = 0xff7a3a) {
+    const count = Math.max(8, Math.round(22 * COUNT_K));
+    for (let k = 0; k < count; k++) {
+      const a = Math.random() * TAU;
+      const sp = (120 + Math.random() * 160) * SPEED_K;
+      emit(x, y, Math.cos(a), Math.sin(a), sp, 0.8 * LIFE_K, hex);
+    }
+  }
+
   // Age + recycle. Dead particles drop to black so they stop contributing to bloom.
   function update(dt) {
     for (let i = 0; i < POOL; i++) {
@@ -136,5 +158,14 @@ export function createFx(scene, world) {
     geo.attributes.color.needsUpdate = true;
   }
 
-  return { points, spawnSend, spawnDeath, spawnFlower, spawnExplosion, update };
+  return {
+    points,
+    spawnSend,
+    spawnDeath,
+    spawnFlower,
+    spawnExplosion,
+    spawnFlare,
+    spawnMeteor,
+    update,
+  };
 }

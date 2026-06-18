@@ -19,6 +19,8 @@ const SFX_FILES = {
   lose: "Lose.wav",
   alert: "Alert.wav", // player lost a rock to an enemy
   explosion: "Explosion.wav", // celestial body destroyed by bombardment
+  flare: "Flare.wav", // solar flare hazard
+  meteor: "Meteor.wav", // meteor impact hazard
 };
 const MUSIC_FILES = ["AmbientDeep.wav", "AmbientShimmer.wav"];
 

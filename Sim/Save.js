@@ -79,6 +79,10 @@ export function serialize(world) {
     nebulae: cloneJson(world.nebulae ?? []),
     belts: cloneJson(world.belts ?? []),
     winConfig: cloneJson(world.winConfig),
+    // Environmental hazards: the on/off flag + in-flight state (timers, live flare rings, fused
+    // meteors) — plain numbers/arrays so a mid-shower save resumes identically. Absent ⇒ off.
+    hazardsOn: !!world.hazardsOn,
+    hazards: world.hazards ? cloneJson(world.hazards) : null,
   };
 }
 
@@ -157,6 +161,10 @@ export function deserialize(saved) {
     events: makeEvents(cap),
     // Black-hole reap memo — null so World.destroyInBlackHoles recomputes from the live bodies.
     _blackholes: null,
+    // Environmental hazards. An old save without the field restores OFF with no hazard state, so
+    // stepHazards never runs (step() gates on hazardsOn) — byte-identical to a pre-hazards world.
+    hazardsOn: !!saved.hazardsOn,
+    hazards: saved.hazards ? cloneJson(saved.hazards) : null,
   };
 
   // world.nav is DERIVED from each body's restored .neighbors (the post-belt graph) — recompute
