@@ -180,9 +180,9 @@ function proposeLoop(width, height, radius, rng) {
 function proposeLinear(width, height, radius, rng, laneAng) {
   const cx = width / 2;
   const cy = height / 2;
-  const span = Math.min(width, height) * 0.85;
+  const span = Math.min(width, height) * 0.9;
   const t = (rng() - 0.5) * span; // along-lane position
-  const perp = (rng() - 0.5) * Math.min(width, height) * 0.28; // perpendicular jitter
+  const perp = (rng() - 0.5) * Math.min(width, height) * 0.45; // corridor width — wide enough to seat a full map
   const x = cx + Math.cos(laneAng) * t - Math.sin(laneAng) * perp;
   const y = cy + Math.sin(laneAng) * t + Math.cos(laneAng) * perp;
   return {
@@ -237,13 +237,13 @@ function placeBodies(world, total, planetCount, seeded, layout) {
     return proposeScatter(width, height, radius, rng);
   };
 
-  const tryPlace = (kind) => {
+  const tryPlace = (kind, proposer = propose) => {
     const isPlanet = kind === "planet";
     for (let attempt = 0; attempt < 500; attempt++) {
       const radius = isPlanet
         ? PLANET_MIN_R + rng() * (PLANET_MAX_R - PLANET_MIN_R)
         : MIN_RADIUS + rng() * (MAX_RADIUS - MIN_RADIUS);
-      const { x, y } = propose(radius);
+      const { x, y } = proposer(radius);
       const cand = { x, y, radius, kind };
       let ok = true;
       for (const a of out) {
@@ -260,7 +260,30 @@ function placeBodies(world, total, planetCount, seeded, layout) {
     return false;
   };
   for (let p = 0; p < planetCount; p++) tryPlace("planet");
-  while (out.length - seeded.length < total) if (!tryPlace("asteroid")) break;
+  if (eff === "scatter") {
+    // Scatter samples the whole field; a failure means it's genuinely full → stop. Unchanged
+    // original path, so the scatter layout stays byte-identical.
+    while (out.length - seeded.length < total) if (!tryPlace("asteroid")) break;
+  } else {
+    // Constrained layouts (loop/linear/hub) legitimately fail INDIVIDUAL placements while room
+    // remains, so one failure must NOT abort the whole map — the old `break` left linear with
+    // ~0-1 asteroids and players homeless (instant game-over). Keep trying until `total` is met or
+    // a run of consecutive failures shows the layout's usable area is saturated.
+    let consecFail = 0;
+    while (out.length - seeded.length < total && consecFail < 12) {
+      if (tryPlace("asteroid")) consecFail = 0;
+      else consecFail++;
+    }
+    // Safety net: a tight layout/seed can seat fewer asteroids than there are players, leaving
+    // someone homeless (instant game-over). Top up with plain scatter placements until there are
+    // enough asteroids for every player to claim a home. Only fires when the layout fell short.
+    const minAst = world.players.length + 1;
+    const scatterAt = (r) => proposeScatter(width, height, r, rng);
+    while (
+      out.reduce((n, b) => n + (b.kind === "asteroid" ? 1 : 0), 0) < minAst &&
+      tryPlace("asteroid", scatterAt)
+    ) {}
+  }
   return out;
 }
 
