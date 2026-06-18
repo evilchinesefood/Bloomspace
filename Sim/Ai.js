@@ -26,8 +26,8 @@ import { buyTech, techCost, TECH_TRACKS, MAX_TIER } from "./Tech.js";
 // the relentless rusher (the old Hard's aggression, dialled up).
 //   interval  — seconds between decisions (lower = acts more often)
 //   fraction  — share of orbiters committed per command
-//   attack    — willing to attack enemy-held rocks at all
-//   plant     — willing to plant growth/defense trees (develops an economy)
+//   attack    — willing to attack enemy-held rocks at all (boolean — personality never flips this)
+//   plant     — willing to plant growth/defense trees (boolean — personality never flips this)
 //   aggression— bias toward attacking over neutral expansion
 //   techChance— per-decision odds of buying a tech tier when comfortably affordable
 //   techBuffer— extra seeds (beyond the tier cost) that must remain after a tech buy, so
@@ -71,8 +71,102 @@ const KNOBS = [
     techBuffer: 12,
   },
 ];
-function knobs(difficulty) {
-  return KNOBS[Math.max(0, Math.min(3, difficulty | 0))];
+// Personality presets — multiplicative/additive modifiers on the NUMERIC knobs only.
+// attack/plant booleans are NEVER touched (Easy stays passive regardless of personality).
+// "neutral" is the default; absent/unknown personality → no change, regression-safe.
+//   aggrMul   — multiplier on aggression
+//   fracMul   — multiplier on fraction
+//   intMul    — multiplier on interval (>1 slows decisions, <1 speeds them up)
+//   techMul   — multiplier on techChance
+//   bufAdd    — additive delta on techBuffer (positive = more cautious tech spending)
+//   planMul   — multiplier on BOMB_KNOBS.planEvery (>1 plants battery trees less often)
+//   fireMul   — multiplier on BOMB_KNOBS.fireEvery (>1 fires less often)
+//   beAdd     — additive delta on BOMB_KNOBS.buildEnergy threshold
+export const PERSONALITIES = {
+  neutral: {
+    aggrMul: 1.0,
+    fracMul: 1.0,
+    intMul: 1.0,
+    techMul: 1.0,
+    bufAdd: 0,
+    planMul: 1.0,
+    fireMul: 1.0,
+    beAdd: 0,
+  },
+  rusher: {
+    aggrMul: 1.6,
+    fracMul: 1.3,
+    intMul: 0.7,
+    techMul: 0.6,
+    bufAdd: -8,
+    planMul: 1.5,
+    fireMul: 0.7,
+    beAdd: -15,
+  },
+  turtle: {
+    aggrMul: 0.4,
+    fracMul: 0.7,
+    intMul: 1.5,
+    techMul: 1.2,
+    bufAdd: 20,
+    planMul: 0.7,
+    fireMul: 1.5,
+    beAdd: 25,
+  },
+  expander: {
+    aggrMul: 0.6,
+    fracMul: 1.2,
+    intMul: 0.9,
+    techMul: 0.9,
+    bufAdd: 5,
+    planMul: 1.2,
+    fireMul: 1.2,
+    beAdd: 10,
+  },
+  "superweapon-fiend": {
+    aggrMul: 1.1,
+    fracMul: 0.9,
+    intMul: 1.0,
+    techMul: 1.8,
+    bufAdd: -5,
+    planMul: 0.5,
+    fireMul: 0.4,
+    beAdd: -20,
+  },
+};
+export const PERSONALITY_NAMES = Object.keys(PERSONALITIES).filter(
+  (k) => k !== "neutral",
+);
+
+// Compute effective numeric knobs for a player, blending difficulty base with personality.
+// Returns a plain object (not the original) so callers can freely read without aliasing concerns.
+// Boolean gates (attack, plant) are copied verbatim — personality cannot flip them.
+function effKnobs(player) {
+  const base = KNOBS[Math.max(0, Math.min(3, player.difficulty | 0))];
+  const pm = PERSONALITIES[player.personality] ?? PERSONALITIES.neutral;
+  return {
+    interval: Math.max(0.3, base.interval * pm.intMul),
+    fraction: Math.min(1.0, Math.max(0.1, base.fraction * pm.fracMul)),
+    attack: base.attack,
+    plant: base.plant,
+    aggression: Math.min(1.0, Math.max(0.0, base.aggression * pm.aggrMul)),
+    techChance: Math.min(1.0, Math.max(0.0, base.techChance * pm.techMul)),
+    techBuffer: Math.max(0, base.techBuffer + pm.bufAdd),
+  };
+}
+
+// Effective BOMB_KNOBS for a player, blending difficulty base with personality.
+// Returns null for Easy (no bombard program) regardless of personality.
+function effBombKnobs(player) {
+  const base = BOMB_KNOBS[Math.max(0, Math.min(3, player.difficulty | 0))];
+  if (!base) return null;
+  const pm = PERSONALITIES[player.personality] ?? PERSONALITIES.neutral;
+  return {
+    buildEnergy: Math.max(60, base.buildEnergy + pm.beAdd),
+    buildBuffer: base.buildBuffer,
+    planEvery: Math.max(1, Math.round(base.planEvery * pm.planMul)),
+    fireEvery: Math.max(1, Math.round(base.fireEvery * pm.fireMul)),
+  };
 }
 
 // Count ORBITing seedlings of `owner` home'd at `rockId` — the pool a send can draw from.
@@ -173,10 +267,6 @@ const BOMB_KNOBS = [
   { buildEnergy: 130, buildBuffer: 45, planEvery: 3, fireEvery: 1 }, // Hard
   { buildEnergy: 110, buildBuffer: 30, planEvery: 2, fireEvery: 1 }, // Brutal
 ];
-function bombKnobs(difficulty) {
-  return BOMB_KNOBS[Math.max(0, Math.min(3, difficulty | 0))];
-}
-
 // Count ORBITing seedlings of any owner home'd at a rock — the "strength" proxy for targeting.
 function orbitersAt(world, rockId) {
   const s = world.seed;
@@ -265,8 +355,7 @@ function pickBombTarget(world) {
 // rock (chosen in decide so normal planting can leave that rock alone to bank energy), then fires
 // it at the human's strongest rock. Paced by per-player decision counters. Returns the host rock
 // id while a battery is being BUILT there (so decide skips it for normal trees), else -1.
-function maybeBombard(world, player, host) {
-  const bk = bombKnobs(player.difficulty);
+function maybeBombard(world, player, host, bk) {
   if (!bk) return -1; // Easy: no bombard
   const id = player.id;
 
@@ -319,7 +408,8 @@ function maybeBombard(world, player, host) {
 
 // One decision for a single AI player: scan owned rocks, expand/attack/grow.
 function decide(world, player) {
-  const k = knobs(player.difficulty);
+  const k = effKnobs(player);
+  const bk = effBombKnobs(player);
   const id = player.id;
   const asts = world.asteroids;
 
@@ -335,7 +425,7 @@ function decide(world, player) {
   let reserved = -1;
   if (k.plant && owned.length >= 2) {
     const bombHost = pickBatteryHost(world, owned, id);
-    reserved = maybeBombard(world, player, bombHost);
+    reserved = maybeBombard(world, player, bombHost, bk);
   }
 
   // Plant on a strong owned rock first (growth → more seedlings over time). Skip the reserved
@@ -400,12 +490,12 @@ export function updateAi(world, dt) {
     const player = players[p];
     if (!player.isAi) continue;
     if (player._aiCd === undefined) {
-      player._aiCd = knobs(player.difficulty).interval;
+      player._aiCd = effKnobs(player).interval;
       player._aiSends = 0; // count of dispatch actions taken (observable, deterministic)
     }
     player._aiCd -= dt;
     if (player._aiCd <= 0) {
-      player._aiCd = knobs(player.difficulty).interval;
+      player._aiCd = effKnobs(player).interval;
       if (decide(world, player) > 0) player._aiSends++;
     }
   }

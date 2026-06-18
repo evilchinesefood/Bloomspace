@@ -303,6 +303,26 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     el("wa-option", { value: "random", textContent: "Random" }),
   ]);
 
+  const personalitySel = el("wa-select", { label: "AI personality" }, [
+    el("wa-option", { value: "random", textContent: "Random (varies per AI)" }),
+    el("wa-option", {
+      value: "rusher",
+      textContent: "Rusher (aggressive, fast)",
+    }),
+    el("wa-option", {
+      value: "turtle",
+      textContent: "Turtle (defensive, patient)",
+    }),
+    el("wa-option", {
+      value: "expander",
+      textContent: "Expander (territory-focused)",
+    }),
+    el("wa-option", {
+      value: "superweapon-fiend",
+      textContent: "Superweapon (battery-obsessed)",
+    }),
+  ]);
+
   // Map size preset nudges the default asteroid count AND clamps the slider's max to a count
   // the chosen map can actually fit (rejection sampling caps placement far below big requests:
   // ~16 small / ~36 medium / 60 large). Keeps the request honest with no MapGen change.
@@ -321,6 +341,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     field(layoutSel),
     field(aiSel),
     field(diffSel),
+    field(personalitySel),
     field(winSel),
     field(timeSel),
   );
@@ -361,6 +382,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     // Match seed: fresh per match — allowed ONLY in the UI layer.
     const seed = (Math.random() * 0xffffffff) >>> 0;
     const layout = layoutSel.value || "scatter";
+    const aiPersonality = personalitySel.value || "random";
     if (!cleanup()) return;
     onConfirm({
       width: size.width,
@@ -371,6 +393,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
       players,
       seed,
       layout,
+      aiPersonality,
       specials: true, // terrain specials (rich rocks + nebulae) on for every started match
       winConfig: { mode, timeLimitSecs },
     });
@@ -384,6 +407,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     sizeSel.value = "medium";
     aiSel.value = "1";
     diffSel.value = "1";
+    personalitySel.value = "random";
     winSel.value = "elimination";
     timeSel.value = "0";
     layoutSel.value = "scatter";

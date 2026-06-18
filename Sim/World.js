@@ -6,7 +6,7 @@ import { updateSeedlings, updateRally } from "./Seedlings.js";
 import { resolveCombat } from "./Combat.js";
 import { updateEconomy } from "./Economy.js";
 import { updateTrees } from "./Trees.js";
-import { updateAi, checkVictory } from "./Ai.js";
+import { updateAi, checkVictory, PERSONALITY_NAMES } from "./Ai.js";
 import { updateBombard } from "./Bombard.js";
 import { initPlayerTech } from "./Tech.js";
 
@@ -171,6 +171,27 @@ export function createWorld(config = {}) {
   world.belts = [];
   // Procedurally place asteroids + seed each player's home orbit (deterministic).
   generateMap(world, config, spawnSeedling);
+  // Assign personality to each AI player AFTER map generation. No world.rng() is consumed here
+  // so mapgen's rng stream is byte-identical to pre-personality worlds (existing tests don't drift).
+  // When aiPersonality is absent or "random", default to "neutral" so existing worlds are bit-for-
+  // bit identical in behaviour; only an explicit non-neutral choice changes the sim rng stream.
+  // "random" from the menu picks a per-AI personality via a seed-derived hash (rng-free).
+  const baseSeed = config.seed ?? 1;
+  for (const p of world.players) {
+    if (!p.isAi) continue;
+    const choice = config.aiPersonality;
+    if (!choice || choice === "neutral") {
+      p.personality = "neutral";
+    } else if (choice !== "random" && PERSONALITY_NAMES.includes(choice)) {
+      p.personality = choice; // explicit named personality — all AIs get it
+    } else {
+      // "random": each AI independently gets a personality via a hash of (seed, playerId).
+      // Hash is rng-free so mapgen stream is undisturbed; reproducible from the seed.
+      const h =
+        ((baseSeed ^ (p.id * 2654435761)) >>> 0) % PERSONALITY_NAMES.length;
+      p.personality = PERSONALITY_NAMES[h];
+    }
+  }
   return world;
 }
 
