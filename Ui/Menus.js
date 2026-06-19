@@ -115,6 +115,20 @@ function startStarfield(canvas) {
   };
 }
 
+// A full-screen backdrop in the game's background color (#05070f, same as Scene.setClearColor)
+// with the scrolling starfield — so the start menu and the New Skirmish window share the in-game
+// look + movement. Returns { wrap, sky }: append content (z-index 1) to wrap, then start the
+// starfield on sky AFTER wrap is in the DOM (so the canvas has a measured size).
+function starfieldBackdrop() {
+  const wrap = overlay("background:#05070f;backdrop-filter:none;");
+  const sky = el("canvas", {
+    "aria-hidden": "true", // decorative starfield — hide from assistive tech
+    style: "position:absolute;inset:0;width:100%;height:100%;display:block;",
+  });
+  wrap.append(sky);
+  return { wrap, sky };
+}
+
 // Start menu: title + (Resume) + Start + Tutorial + GitHub link, over a scrolling starfield.
 // onNew() starts a fresh match; onResume() (shown only when `hasSave` is true) restores the
 // in-progress match; onTutorial() launches the guided tutorial mode (always available, no save).
@@ -122,12 +136,7 @@ export function showStartMenu(
   root,
   { onNew, onResume, onTutorial, hasSave = false },
 ) {
-  const wrap = overlay("background:#05070f;backdrop-filter:none;");
-  const sky = el("canvas", {
-    "aria-hidden": "true", // decorative starfield — hide from assistive tech
-    style: "position:absolute;inset:0;width:100%;height:100%;display:block;",
-  });
-  wrap.append(sky);
+  const { wrap, sky } = starfieldBackdrop();
 
   const card = el("wa-card", {
     style:
@@ -211,7 +220,7 @@ export function showStartMenu(
   card.append(
     el("div", {
       style: "margin-top:.8rem;font:600 .72rem system-ui;opacity:.72;",
-      textContent: "build v30",
+      textContent: "build v31",
     }),
   );
 
@@ -229,19 +238,20 @@ export function showStartMenu(
 
 // Skirmish setup dialog: map size, asteroid count, # AI, difficulty. onConfirm(config).
 export function showSkirmishSetup(root, { onConfirm, onCancel }) {
-  const wrap = overlay();
-  const dialog = el("wa-dialog", {
-    label: "New Skirmish",
-    open: true,
-    style: "--width:30rem;",
+  // Same starfield backdrop + movement as the intro screen (instead of a plain modal dialog), so
+  // the New Skirmish window matches the in-game background. The form lives in a wa-card over it.
+  const { wrap, sky } = starfieldBackdrop();
+  const card = el("wa-card", {
+    style:
+      "position:relative;z-index:1;pointer-events:auto;max-width:32rem;width:92%;" +
+      "--padding:1.5rem;max-height:92vh;overflow-y:auto;text-align:left;",
   });
-  // Keep the dialog from closing itself on overlay/Escape without our cleanup.
-  // `cleanup()` latches via `done` so exactly one of onCancel/onConfirm ever fires — a
-  // successful Start (which removes the wrap) won't also emit a trailing wa-hide → onCancel.
-  dialog.addEventListener("wa-hide", (e) => {
-    if (e.target !== dialog) return;
-    if (cleanup()) onCancel && onCancel();
-  });
+  card.append(
+    el("h2", {
+      style: "margin:0 0 1rem;font:700 1.5rem system-ui;",
+      textContent: "New Skirmish",
+    }),
+  );
 
   // a11y: each control carries its own native `label` attribute (Web Awesome associates it with
   // the field), so field() just adds spacing — no detached <label> to mis-associate.
@@ -356,7 +366,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
       textContent: label,
     });
 
-  dialog.append(
+  card.append(
     section("Map", false),
     field(sizeSel),
     field(countSlider),
@@ -374,22 +384,34 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
   );
 
   const cancelBtn = el("wa-button", {
-    slot: "footer",
+    style: "flex:1;",
     textContent: "Cancel",
   });
   const startBtn = el("wa-button", {
-    slot: "footer",
+    style: "flex:1;",
     variant: "brand",
     html: '<i slot="start" class="fa-solid fa-play"></i>Start Match',
   });
-  dialog.append(cancelBtn, startBtn);
+  card.append(
+    el("div", { style: "display:flex;gap:.6rem;margin-top:1.4rem;" }, [
+      cancelBtn,
+      startBtn,
+    ]),
+  );
 
   let done = false;
+  let stopSky = null;
   function cleanup() {
     if (done) return false;
     done = true;
+    if (stopSky) stopSky();
+    document.removeEventListener("keydown", onKey);
     wrap.remove();
     return true;
+  }
+  // Escape cancels (the old wa-dialog gave this for free via wa-hide; the card needs it explicit).
+  function onKey(e) {
+    if (e.key === "Escape" && cleanup()) onCancel && onCancel();
   }
   cancelBtn.addEventListener("click", () => {
     if (cleanup()) onCancel && onCancel();
@@ -429,8 +451,11 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     });
   });
 
-  wrap.append(dialog);
+  wrap.append(card);
   root.append(wrap);
+  // Start the starfield AFTER the canvas is in the DOM so it has a measured size.
+  stopSky = startStarfield(sky);
+  document.addEventListener("keydown", onKey);
   // Pre-fill the dropdowns once Web Awesome has defined wa-select (so the value applies with
   // its options already present — this is the part that was blank on a New Game reset).
   const prefill = () => {

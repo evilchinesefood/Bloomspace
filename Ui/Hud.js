@@ -640,8 +640,7 @@ export function createHud(root, api) {
   const connectBtn = el("wa-button", {
     size: "small",
     style: "width:100%;margin-bottom:.4rem;",
-    title:
-      "Build a permanent travel link to another body you own: click, then pick it. Costs energy from this rock.",
+    title: `Build a permanent one-way travel link to another body you own: click, then pick it. Costs ${CONNECT_ENERGY_COST} energy from this rock.`,
     html: '<i slot="start" class="fa-solid fa-link"></i>Build Connection',
   });
   connectBtn.addEventListener("click", () =>
@@ -894,6 +893,7 @@ export function createHud(root, api) {
         "disabled",
         !connecting && a.energy < CONNECT_ENERGY_COST,
       );
+      connectBtn.title = `Build a permanent one-way travel link to another body you own (costs ${CONNECT_ENERGY_COST} energy): click, then pick the target.${a.energy < CONNECT_ENERGY_COST ? " Not enough energy." : ""}`;
       setHtml(
         connectBtn,
         connecting
