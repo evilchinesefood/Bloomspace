@@ -5,7 +5,12 @@
 // the scene stays visible behind menus.
 import { createGame } from "../Game.js";
 import { createHud } from "./Hud.js";
-import { showStartMenu, showSkirmishSetup, showGameOver } from "./Menus.js";
+import {
+  showStartMenu,
+  showSkirmishSetup,
+  showGameOver,
+  createStarfieldBackdrop,
+} from "./Menus.js";
 import { createTutorial, TUTORIAL_CONFIG } from "./Tutorial.js";
 import { WORLD_STATUS } from "../Sim/World.js";
 import { writeSave, readSave, hasSave, clearSave } from "./Persist.js";
@@ -41,6 +46,7 @@ export function createApp(root) {
   let speed = 1; // 1×/2×/3× sim-time multiplier
   let paused = false;
   let closeOverlay = null; // teardown for the current full-screen overlay
+  let menuBackdrop = null; // persistent starfield shared by start menu + skirmish setup
   let gameOverShown = false;
   let tutorial = null; // the tutorial coachmark controller (non-null ONLY in tutorial mode)
   let isTutorial = false; // tutorial mode gates autosave OFF so it never writes the real save slot
@@ -107,6 +113,18 @@ export function createApp(root) {
       closeOverlay = null;
     }
   }
+  // The menu starfield persists across the start-menu ↔ skirmish-setup transition (so the stars
+  // don't reset/reprint on New Game or Cancel). Created on entering the menu; destroyed only when
+  // a match begins.
+  function ensureBackdrop() {
+    if (!menuBackdrop) menuBackdrop = createStarfieldBackdrop(root);
+  }
+  function destroyBackdrop() {
+    if (menuBackdrop) {
+      menuBackdrop.destroy();
+      menuBackdrop = null;
+    }
+  }
   function tearDownMatch() {
     // Drop the per-match tab-hide autosave listener so matches don't stack handlers (leak).
     if (visibilityHandler) {
@@ -140,9 +158,10 @@ export function createApp(root) {
     tearDownMatch();
     state = APP_STATE.MENU;
     gameOverShown = false;
+    ensureBackdrop(); // keep/create the persistent starfield (no reprint on Cancel→menu)
     // Offer Resume only when a usable in-progress save exists (cheap probe). resumeMatch does
     // the full readSave + null-guard, so a save that turns out corrupt at click time falls back.
-    closeOverlay = showStartMenu(root, {
+    closeOverlay = showStartMenu(menuBackdrop.wrap, {
       onNew: toSetup,
       onResume: resumeMatch,
       onTutorial: startTutorial,
@@ -153,7 +172,8 @@ export function createApp(root) {
   function toSetup() {
     clearOverlay();
     state = APP_STATE.SETUP;
-    closeOverlay = showSkirmishSetup(root, {
+    ensureBackdrop(); // reuse the start menu's starfield (no reprint on New Game)
+    closeOverlay = showSkirmishSetup(menuBackdrop.wrap, {
       onConfirm: startMatch,
       onCancel: toMenu,
     });
@@ -164,6 +184,7 @@ export function createApp(root) {
   // then hands off to beginPlaying for the shared HUD/listener/PLAYING setup.
   function startMatch(config) {
     clearOverlay();
+    destroyBackdrop(); // leaving the menu for a match — drop the starfield backdrop
     tearDownMatch();
     clearSave(); // a brand-new game invalidates any prior resumable save
     canvas = freshCanvas();
@@ -180,6 +201,7 @@ export function createApp(root) {
     const world = readSave();
     if (!world) return; // corrupt/unreadable — don't tear down the menu, just ignore
     clearOverlay();
+    destroyBackdrop();
     tearDownMatch();
     canvas = freshCanvas();
     game = createGame(canvas, {}, world); // 3rd arg = restored world; skips world generation
@@ -195,6 +217,7 @@ export function createApp(root) {
   // state; the player drives every step through the real Input/Hud, the controller only gates.
   function startTutorial() {
     clearOverlay();
+    destroyBackdrop();
     tearDownMatch();
     isTutorial = true; // set before beginPlaying so the seeded autosave + tab-hide save are inert
     canvas = freshCanvas();

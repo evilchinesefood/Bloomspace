@@ -37,6 +37,7 @@ export function createTreeView(scene, world) {
   const sproutMesh = makeMesh(scene, ICON.sprout); // young seedling tree
   const treeMesh = makeMesh(scene, ICON.tree); // mature seedling tree
   const defMesh = makeMesh(scene, ICON.shield); // defense tree
+  const bombMesh = makeMesh(scene, ICON.bomb); // bombardment battery — distinct bomb sprite
   const dummy = new THREE.Object3D();
   const green = new THREE.Color(TREE_GREEN);
   const col = new THREE.Color();
@@ -44,7 +45,8 @@ export function createTreeView(scene, world) {
   function update() {
     let ms = 0,
       mt = 0,
-      md = 0;
+      md = 0,
+      mb = 0;
     for (const a of world.asteroids) {
       const trees = a.trees;
       if (!trees || trees.length === 0) continue;
@@ -69,7 +71,13 @@ export function createTreeView(scene, world) {
         dummy.rotation.set(0, 0, ang - HALF_PI); // grow radially outward from the surface
         dummy.scale.set(size, size, 1);
         dummy.updateMatrix();
-        if (tree.type === "defense") {
+        if (tree.type === "bombard") {
+          if (mb >= MAX) continue;
+          ownerColor(col, a.owner);
+          bombMesh.setMatrixAt(mb, dummy.matrix);
+          bombMesh.setColorAt(mb, col);
+          mb++;
+        } else if (tree.type === "defense") {
           if (md >= MAX) continue;
           ownerColor(col, a.owner);
           defMesh.setMatrixAt(md, dummy.matrix);
@@ -91,14 +99,17 @@ export function createTreeView(scene, world) {
     sproutMesh.count = ms;
     treeMesh.count = mt;
     defMesh.count = md;
+    bombMesh.count = mb;
     sproutMesh.instanceMatrix.needsUpdate = true;
     treeMesh.instanceMatrix.needsUpdate = true;
     defMesh.instanceMatrix.needsUpdate = true;
+    bombMesh.instanceMatrix.needsUpdate = true;
     if (sproutMesh.instanceColor) sproutMesh.instanceColor.needsUpdate = true;
     if (treeMesh.instanceColor) treeMesh.instanceColor.needsUpdate = true;
     if (defMesh.instanceColor) defMesh.instanceColor.needsUpdate = true;
+    if (bombMesh.instanceColor) bombMesh.instanceColor.needsUpdate = true;
   }
   update();
 
-  return { sproutMesh, treeMesh, defMesh, update };
+  return { sproutMesh, treeMesh, defMesh, bombMesh, update };
 }

@@ -135,15 +135,30 @@ function starfieldBackdrop() {
   return { wrap, sky };
 }
 
+// A PERSISTENT menu backdrop: the dark background + scrolling starfield, owned by the caller (App)
+// and kept alive across the start-menu ↔ skirmish-setup transition so the stars don't reset/reprint
+// each time. Menus mount their card into `.wrap` and remove only the card on close; App calls
+// destroy() once, when a match starts. Returns { wrap, destroy }.
+export function createStarfieldBackdrop(root) {
+  const { wrap, sky } = starfieldBackdrop();
+  root.append(wrap);
+  const stopSky = startStarfield(sky); // canvas is in the DOM now, so it has a measured size
+  return {
+    wrap,
+    destroy() {
+      stopSky();
+      wrap.remove();
+    },
+  };
+}
+
 // Start menu: title + (Resume) + Start + Tutorial + GitHub link, over a scrolling starfield.
 // onNew() starts a fresh match; onResume() (shown only when `hasSave` is true) restores the
 // in-progress match; onTutorial() launches the guided tutorial mode (always available, no save).
 export function showStartMenu(
-  root,
+  mount,
   { onNew, onResume, onTutorial, hasSave = false },
 ) {
-  const { wrap, sky } = starfieldBackdrop();
-
   const card = el("wa-card", {
     style:
       "position:relative;z-index:1;pointer-events:auto;max-width:440px;width:90%;" +
@@ -226,27 +241,23 @@ export function showStartMenu(
   card.append(
     el("div", {
       style: "margin-top:.8rem;font:600 .72rem system-ui;opacity:.72;",
-      textContent: "build v33",
+      textContent: "build v34",
     }),
   );
 
-  wrap.append(card);
-  root.append(wrap);
-  // Start the starfield AFTER the canvas is in the DOM so it has a measured size.
-  const stopSky = startStarfield(sky);
-
+  mount.append(card);
+  // The starfield backdrop is owned by the caller (App) and persists across the menu↔setup
+  // transition, so closing this menu removes ONLY the card — the stars keep scrolling.
   function cleanup() {
-    stopSky();
-    wrap.remove();
+    card.remove();
   }
   return cleanup;
 }
 
 // Skirmish setup dialog: map size, asteroid count, # AI, difficulty. onConfirm(config).
-export function showSkirmishSetup(root, { onConfirm, onCancel }) {
-  // Same starfield backdrop + movement as the intro screen (instead of a plain modal dialog), so
-  // the New Skirmish window matches the in-game background. The form lives in a wa-card over it.
-  const { wrap, sky } = starfieldBackdrop();
+export function showSkirmishSetup(mount, { onConfirm, onCancel }) {
+  // Renders into the caller-owned PERSISTENT starfield backdrop (shared with the start menu), so
+  // moving between New Game and Cancel never resets/reprints the stars. The form is a wa-card over it.
   const card = el("wa-card", {
     style:
       "position:relative;z-index:1;pointer-events:auto;max-width:32rem;width:92%;" +
@@ -406,13 +417,11 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
   );
 
   let done = false;
-  let stopSky = null;
   function cleanup() {
     if (done) return false;
     done = true;
-    if (stopSky) stopSky();
     document.removeEventListener("keydown", onKey);
-    wrap.remove();
+    card.remove(); // remove only the card; App owns + persists the starfield backdrop
     return true;
   }
   // Escape cancels (the old wa-dialog gave this for free via wa-hide; the card needs it explicit).
@@ -457,10 +466,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     });
   });
 
-  wrap.append(card);
-  root.append(wrap);
-  // Start the starfield AFTER the canvas is in the DOM so it has a measured size.
-  stopSky = startStarfield(sky);
+  mount.append(card);
   document.addEventListener("keydown", onKey);
   // Pre-fill the dropdowns once Web Awesome has defined wa-select (so the value applies with
   // its options already present — this is the part that was blank on a New Game reset).
