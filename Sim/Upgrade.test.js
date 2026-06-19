@@ -8,6 +8,7 @@ import {
   STAT_DELTA,
   upgradeCost,
   upgradeTier,
+  maxTier,
   canUpgrade,
   buyUpgrade,
 } from "./Upgrade.js";
@@ -37,6 +38,7 @@ function setup(w, owner = 0, seeds = 500) {
   p.seeds = seeds;
   const rock = ownedRock(w, owner);
   assert.ok(rock, `player ${owner} must own a habitable rock`);
+  rock.radius = 200; // big-planet sized so its per-rock cap === MAX_TIER (deterministic cap tests)
   return rock;
 }
 
@@ -57,35 +59,27 @@ test("buyUpgrade: insufficient seeds → false, no stat change, no deduction", (
 
 test("buyUpgrade: success raises stat by STAT_DELTA and deducts escalating cost; tier increments", () => {
   const w = world();
-  const rock = setup(w, 0, 1000);
+  const rock = setup(w, 0, 1000); // setup forces radius 200 → cap === MAX_TIER
   const base = rock.energyStat;
-
-  // tier 0 → 1
-  assert.equal(buyUpgrade(w, rock.id, UPGRADE.ENERGY, 0), true);
-  assert.equal(
-    rock.energyStat,
-    base + STAT_DELTA,
-    "energyStat +STAT_DELTA after tier 1",
-  );
-  assert.equal(
-    w.players[0].seeds,
-    1000 - UPGRADE_COST[0],
-    "deducted tier-0 cost",
-  );
-  assert.equal(upgradeTier(rock, UPGRADE.ENERGY), 1);
-
-  // tier 1 → 2
-  const seeds1 = w.players[0].seeds;
-  assert.equal(buyUpgrade(w, rock.id, UPGRADE.ENERGY, 0), true);
-  assert.equal(rock.energyStat, base + STAT_DELTA * 2);
-  assert.equal(w.players[0].seeds, seeds1 - UPGRADE_COST[1]);
-  assert.equal(upgradeTier(rock, UPGRADE.ENERGY), 2);
-
-  // tier 2 → 3
-  const seeds2 = w.players[0].seeds;
-  assert.equal(buyUpgrade(w, rock.id, UPGRADE.ENERGY, 0), true);
-  assert.equal(rock.energyStat, base + STAT_DELTA * 3);
-  assert.equal(w.players[0].seeds, seeds2 - UPGRADE_COST[2]);
+  for (let t = 0; t < MAX_TIER; t++) {
+    const seedsBefore = w.players[0].seeds;
+    assert.equal(
+      buyUpgrade(w, rock.id, UPGRADE.ENERGY, 0),
+      true,
+      `buy tier ${t}`,
+    );
+    assert.equal(
+      rock.energyStat,
+      base + STAT_DELTA * (t + 1),
+      `energyStat +${t + 1}×STAT_DELTA`,
+    );
+    assert.equal(
+      w.players[0].seeds,
+      seedsBefore - UPGRADE_COST[t],
+      `deducted tier-${t} cost`,
+    );
+    assert.equal(upgradeTier(rock, UPGRADE.ENERGY), t + 1);
+  }
   assert.equal(upgradeTier(rock, UPGRADE.ENERGY), MAX_TIER);
 });
 
@@ -121,6 +115,37 @@ test("buyUpgrade: can't buy past MAX_TIER → returns false, no mutation", () =>
   );
   assert.equal(rock.strengthStat, statBefore, "stat pinned at MAX");
   assert.equal(w.players[0].seeds, seedsBefore, "seeds unchanged at MAX");
+});
+
+// --- 3b. Per-body cap scales with body size ---------------------------------
+
+test("maxTier scales with body size: tiny 1, asteroid 2, big planet up to 5", () => {
+  const w = world();
+  const rock = setup(w, 0, 5000); // setup forces radius 200
+  assert.equal(maxTier(rock), 5, "big planet caps at 5");
+
+  rock.radius = 25; // tiny asteroid / moon
+  rock.upgrades = { energy: 0, strength: 0, speed: 0 };
+  assert.equal(maxTier(rock), 1, "tiny body caps at 1");
+  assert.equal(
+    buyUpgrade(w, rock.id, UPGRADE.ENERGY, 0),
+    true,
+    "first upgrade ok",
+  );
+  assert.equal(
+    buyUpgrade(w, rock.id, UPGRADE.ENERGY, 0),
+    false,
+    "tiny body can't upgrade past tier 1",
+  );
+  assert.equal(canUpgrade(rock, UPGRADE.ENERGY), false);
+
+  rock.radius = 35; // regular asteroid
+  assert.equal(maxTier(rock), 2, "regular asteroid caps at 2");
+  assert.equal(
+    canUpgrade(rock, UPGRADE.ENERGY),
+    true,
+    "tier 1 < cap 2 → can still upgrade",
+  );
 });
 
 // --- 4. Wrong owner ---------------------------------------------------------

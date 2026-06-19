@@ -380,7 +380,7 @@ test("immature defense trees do not raise the defender cap", () => {
   );
 });
 
-test("rally keeps defenders (kind 1) home while funneling fighters", () => {
+test("rally funnels defenders (kind 1) too, not just fighters", () => {
   const w = world();
   const home = ownedRock(w);
   const anchor = neutralRock(w);
@@ -402,8 +402,8 @@ test("rally keeps defenders (kind 1) home while funneling fighters", () => {
   };
   assert.equal(
     defendersHome(),
-    1,
-    "rally wrongly funneled the defender away from home",
+    0,
+    "rally should funnel the defender out toward the anchor too",
   );
 });
 

@@ -9,9 +9,22 @@ export const UPGRADE = {
   SPEED: "speed",
 };
 export const UPGRADE_STATS = [UPGRADE.ENERGY, UPGRADE.STRENGTH, UPGRADE.SPEED];
-export const MAX_TIER = 3;
+// Global ceiling (cost-table length + UI dot count). The ACTUAL per-rock cap scales with body
+// size — see maxTier: tiny asteroids/moons 1, regular asteroids 2, planets 3-5.
+export const MAX_TIER = 5;
 export const STAT_DELTA = 10; // raw stat points added per tier
-export const UPGRADE_COST = [20, 40, 80]; // seeds to go from tier 0→1, 1→2, 2→3
+export const UPGRADE_COST = [20, 40, 80, 150, 250]; // seeds for tier 0→1 … 4→5 (escalating)
+
+// maxTier — how many times a SINGLE rock can be upgraded per stat, scaled by its radius so bigger
+// bodies are worth more investment. Asteroids are radius ~18-40, planets ~112-184 (Sim/MapGen.js).
+export function maxTier(rock) {
+  const r = (rock && rock.radius) || 0;
+  if (r >= 160) return 5; // largest planets
+  if (r >= 135) return 4;
+  if (r >= 100) return 3; // planets begin ~112
+  if (r >= 28) return 2; // regular asteroids
+  return 1; // tiny asteroids / moons
+}
 
 export function upgradeCost(tier) {
   if (tier < 0 || tier >= MAX_TIER) return null;
@@ -29,7 +42,7 @@ export function upgradeTier(rock, stat) {
 }
 
 export function canUpgrade(rock, stat) {
-  return upgradeTier(rock, stat) < MAX_TIER;
+  return upgradeTier(rock, stat) < maxTier(rock);
 }
 
 function playerById(world, id) {
@@ -56,7 +69,7 @@ export function buyUpgrade(world, rockId, stat, owner) {
   if (!player) return false;
   initUpgrades(rock);
   const tier = rock.upgrades[stat] | 0;
-  if (tier >= MAX_TIER) return false;
+  if (tier >= maxTier(rock)) return false;
   const cost = upgradeCost(tier);
   if (cost == null || (player.seeds ?? 0) < cost) return false;
   player.seeds -= cost;
@@ -73,6 +86,7 @@ export default {
   UPGRADE_COST,
   upgradeCost,
   upgradeTier,
+  maxTier,
   canUpgrade,
   buyUpgrade,
 };

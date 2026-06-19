@@ -19,9 +19,9 @@ import { KIND } from "../Sim/World.js";
 import { TECH, MAX_TIER, techCost } from "../Sim/Tech.js";
 import {
   UPGRADE,
-  MAX_TIER as UPG_MAX_TIER,
   upgradeCost,
   upgradeTier,
+  maxTier as upgradeMaxTier,
 } from "../Sim/Upgrade.js";
 
 const hex = (n) => "#" + (n >>> 0).toString(16).padStart(6, "0").slice(-6);
@@ -274,21 +274,11 @@ export function createHud(root, api) {
     }
   }
 
-  // Settings popover: resume + a clean seam for the T8 quality toggle.
+  // Settings popover: quality toggles. Closes on outside click / the gear toggle — no Resume
+  // button, since opening the popover never pauses the game (nothing to resume).
   const settings = el("wa-popover", {
     for: "BsSettingsBtn",
     placement: "bottom-end",
-  });
-  const resumeBtn = el("wa-button", {
-    size: "small",
-    variant: "brand",
-    style: "width:100%;margin-bottom:.5rem;",
-    textContent: "Resume",
-  });
-  resumeBtn.addEventListener("click", () => {
-    api.setPaused(false);
-    settings.open = false;
-    refreshSpeed();
   });
   // --- Quality controls: bloom on/off, audio toggles, render-only seedling cap. ----------
   const q = (api.getQuality && api.getQuality()) || {
@@ -300,7 +290,7 @@ export function createHud(root, api) {
 
   // Bloom toggle — flips the UnrealBloomPass in/out of the composer (the escape hatch).
   const bloomSwitch = el("wa-switch", {
-    style: "margin-bottom:.6rem;",
+    style: "display:block;margin-bottom:.6rem;",
     textContent: "Bloom glow",
   });
   if (q.bloom !== false) bloomSwitch.setAttribute("checked", "");
@@ -310,7 +300,7 @@ export function createHud(root, api) {
 
   // SFX toggle — flips the audio engine's SFX gain (one-shot event sounds).
   const sfxSwitch = el("wa-switch", {
-    style: "margin-bottom:.6rem;",
+    style: "display:block;margin-bottom:.6rem;",
     textContent: "Sound effects",
   });
   if (q.sfx !== false) sfxSwitch.setAttribute("checked", "");
@@ -320,7 +310,7 @@ export function createHud(root, api) {
 
   // Music toggle — starts/stops the looping ambient bed live.
   const musicSwitch = el("wa-switch", {
-    style: "margin-bottom:.6rem;",
+    style: "display:block;margin-bottom:.6rem;",
     textContent: "Ambient music",
   });
   if (q.music !== false) musicSwitch.setAttribute("checked", "");
@@ -338,11 +328,18 @@ export function createHud(root, api) {
   const capSelect = el("wa-select", {
     label: "Max drawn seedlings",
     size: "small",
-    style: "margin-bottom:.4rem;",
-    value: String(q.seedlingCap || 0),
+    style: "display:block;margin-bottom:.4rem;",
   });
   for (const [val, label] of capOptions)
     capSelect.append(el("wa-option", { value: val, textContent: label }));
+  // Pre-fill the current cap as a PROPERTY after the options exist AND after wa-select upgrades
+  // (mirrors the skirmish prefill): a `value` set before the options/upgrade won't select reliably.
+  const capValue = String(q.seedlingCap || 0);
+  capSelect.value = capValue;
+  if (window.customElements && customElements.whenDefined)
+    customElements.whenDefined("wa-select").then(() => {
+      capSelect.value = capValue;
+    });
   const onCap = () =>
     api.setSeedlingCap && api.setSeedlingCap(Number(capSelect.value) || 0);
   capSelect.addEventListener("change", onCap);
@@ -354,7 +351,6 @@ export function createHud(root, api) {
         style: "font-weight:700;margin-bottom:.5rem;",
         textContent: "Settings",
       }),
-      resumeBtn,
       bloomSwitch,
       sfxSwitch,
       musicSwitch,
@@ -541,19 +537,19 @@ export function createHud(root, api) {
     style: "font:600 .78rem system-ui;opacity:.75;margin:.5rem 0 .25rem;",
     textContent: "Upgrade rock",
   });
-  const mkUpgBtn = (stat, color) => {
+  const mkUpgBtn = (stat, variant) => {
     const btn = el("wa-button", {
       size: "small",
+      variant, // distinct fill per stat: energy=amber, strength=red, speed=blue
       style: `flex:1;min-width:0;`,
     });
     btn.addEventListener("click", () => api.onUpgrade(stat));
     btn._upgStat = stat;
-    btn._upgColor = color;
     return btn;
   };
-  const upgEnergyBtn = mkUpgBtn(UPGRADE.ENERGY, "#ffd24b");
-  const upgStrBtn = mkUpgBtn(UPGRADE.STRENGTH, "#ff6b6b");
-  const upgSpdBtn = mkUpgBtn(UPGRADE.SPEED, "#5ad1ff");
+  const upgEnergyBtn = mkUpgBtn(UPGRADE.ENERGY, "warning");
+  const upgStrBtn = mkUpgBtn(UPGRADE.STRENGTH, "danger");
+  const upgSpdBtn = mkUpgBtn(UPGRADE.SPEED, "brand");
   const upgRow = el(
     "div",
     {
@@ -767,40 +763,27 @@ export function createHud(root, api) {
 
     // Upgrade panel: shown only for owned rocks; update button labels + disabled state.
     upgLabel.style.display = owned ? "" : "none";
-    upgRow.style.display = owned ? "" : "none";
+    upgRow.style.display = owned ? "flex" : "none"; // keep the flex row (─ "" would revert to block → buttons wrap)
     if (owned) {
       const seeds = playerSeeds(world, HUMAN);
+      const cap = upgradeMaxTier(a); // per-rock cap — scales with body size (small 1-2, planets 3-5)
       const upgBtns = [
-        [
-          upgEnergyBtn,
-          UPGRADE.ENERGY,
-          "#ffd24b",
-          "Energy",
-          "faster energy regen",
-        ],
-        [
-          upgStrBtn,
-          UPGRADE.STRENGTH,
-          "#ff6b6b",
-          "Strength",
-          "stronger seedlings",
-        ],
-        [upgSpdBtn, UPGRADE.SPEED, "#5ad1ff", "Speed", "faster seedlings"],
+        [upgEnergyBtn, UPGRADE.ENERGY, "Energy", "faster energy regen"],
+        [upgStrBtn, UPGRADE.STRENGTH, "Strength", "stronger seedlings"],
+        [upgSpdBtn, UPGRADE.SPEED, "Speed", "faster seedlings"],
       ];
-      for (const [btn, stat, color, label, effect] of upgBtns) {
+      for (const [btn, stat, label, effect] of upgBtns) {
         const tier = upgradeTier(a, stat);
-        const maxed = tier >= UPG_MAX_TIER;
+        const maxed = tier >= cap;
         const cost = upgradeCost(tier);
-        const afford = !maxed && seeds >= cost;
+        const afford = !maxed && cost != null && seeds >= cost;
         setProp(btn, "disabled", maxed || !afford);
-        // Label = just the stat (what it upgrades); cost + effect live in the hover tooltip.
-        setHtml(
-          btn,
-          `<span style="color:${color}">${label}${maxed ? " ✓" : ""}</span>`,
-        );
+        // The button is colored by its WA variant; the label is just the stat. Cost + tier + effect
+        // live in the hover tooltip (tier count shows the per-body cap, e.g. 2/2 on a small rock).
+        setHtml(btn, `${label}${maxed ? " ✓" : ""}`);
         btn.title = maxed
-          ? `${label} fully upgraded (${UPG_MAX_TIER}/${UPG_MAX_TIER}) — ${effect}.`
-          : `Upgrade ${label} for ${cost} seeds → tier ${tier + 1}/${UPG_MAX_TIER} (${effect})${afford ? "" : " — not enough seeds"}.`;
+          ? `${label} fully upgraded (${cap}/${cap}) — ${effect}.`
+          : `Upgrade ${label} for ${cost} seeds → tier ${tier + 1}/${cap} (${effect})${afford ? "" : " — not enough seeds"}.`;
       }
     }
 

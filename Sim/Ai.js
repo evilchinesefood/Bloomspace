@@ -45,13 +45,13 @@ const KNOBS = [
     techBuffer: 0,
   },
   {
-    interval: 3.0,
-    fraction: 0.4,
+    interval: 6.0,
+    fraction: 0.3,
     attack: true,
     plant: true,
-    aggression: 0.06,
-    techChance: 0.08,
-    techBuffer: 30,
+    aggression: 0.0,
+    techChance: 0.04,
+    techBuffer: 40,
   },
   {
     interval: 1.5,

@@ -226,7 +226,7 @@ export function showStartMenu(
   card.append(
     el("div", {
       style: "margin-top:.8rem;font:600 .72rem system-ui;opacity:.72;",
-      textContent: "build v32",
+      textContent: "build v33",
     }),
   );
 

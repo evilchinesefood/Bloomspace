@@ -3,7 +3,6 @@
 import {
   STATE,
   OWNER_NEUTRAL,
-  KIND,
   EVENT,
   pushEvent,
   MAX_PLAYERS,
@@ -274,9 +273,9 @@ export function setRally(world, fromId, toId, owner) {
 const RALLY_INTERVAL = 0.35;
 
 // updateRally — what actually makes a rally point DO something: every rallied rock launches
-// its currently-orbiting FIGHTERS (kind 0) toward the anchor, draining both the rock's
-// existing seedlings and anything newly produced/arrived. Defenders (kind 1) stay to guard.
-// Arrivals re-home to the target (joinOrbit), so they aren't re-grabbed here — no loop.
+// its currently-orbiting ships (BOTH fighters and defenders) toward the anchor, draining the
+// rock's existing seedlings and anything newly produced/arrived. Arrivals re-home to the target
+// (joinOrbit), so they aren't re-grabbed here — no loop.
 export function updateRally(world, dt) {
   const s = world.seed;
   const asts = world.asteroids;
@@ -304,13 +303,13 @@ export function updateRally(world, dt) {
   const buckets = []; // sparse: home rock id → array of seedling indices
   for (const f of firing) buckets[f.rock.id] = [];
   for (let i = 0; i < s.count; i++) {
-    if (s.state[i] !== STATE.ORBIT || s.kind[i] !== KIND.FIGHTER) continue;
+    if (s.state[i] !== STATE.ORBIT) continue; // funnel ALL orbiting ships (fighters + defenders)
     const b = buckets[s.home[i]];
     if (b) b.push(i);
   }
   for (const { rock, tgt } of firing) {
     for (const i of buckets[rock.id])
-      if (s.owner[i] === rock.owner) launchSeedling(world, i, tgt); // keep defenders home
+      if (s.owner[i] === rock.owner) launchSeedling(world, i, tgt);
   }
 }
 
