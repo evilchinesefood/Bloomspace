@@ -425,3 +425,54 @@ test("Sim/Fog.js uses no Math.random / Date.now / performance.now and no rng()",
   ])
     assert.ok(!src.includes(bad), `Fog.js must not use ${bad}`);
 });
+
+// --- Grid equivalence (regression: spatial pruning must match a full scan) ----
+
+test("computeFog grid matches a brute-force full scan (incl. moving moons)", () => {
+  const w = mkDense({ fog: true });
+  // Step well past tick 0 so moons orbit (positions diverge from any build-time layout) and the
+  // fleet spreads — exercising both vision passes at non-trivial positions.
+  for (let i = 0; i < 200; i++) Sim.step(w, 1 / 30);
+  computeFog(w); // recompute now from current positions (grid implementation)
+
+  // Independent brute-force reference: every source tests EVERY rock (no grid). The grid result
+  // must equal this exactly, or the spatial pruning changed visibility.
+  const asts = w.asteroids;
+  const nR = asts.length;
+  const nP = w.fog.seen.length;
+  const R2 = VISION_R * VISION_R;
+  const ref = [];
+  for (let p = 0; p < nP; p++) ref.push(new Uint8Array(nR));
+  for (let p = 0; p < nP; p++) {
+    const seen = ref[p];
+    for (let i = 0; i < nR; i++) {
+      const src = asts[i];
+      if (src.dead || src.owner !== p) continue;
+      seen[i] = 1;
+      for (let r = 0; r < nR; r++) {
+        if (seen[r] || asts[r].dead) continue;
+        const dx = asts[r].x - src.x,
+          dy = asts[r].y - src.y;
+        if (dx * dx + dy * dy <= R2) seen[r] = 1;
+      }
+    }
+  }
+  const s = w.seed;
+  for (let i = 0; i < s.count; i++) {
+    const o = s.owner[i];
+    if (o < 0 || o >= nP) continue;
+    const seen = ref[o];
+    for (let r = 0; r < nR; r++) {
+      if (seen[r] || asts[r].dead) continue;
+      const dx = asts[r].x - s.x[i],
+        dy = asts[r].y - s.y[i];
+      if (dx * dx + dy * dy <= R2) seen[r] = 1;
+    }
+  }
+  for (let p = 0; p < nP; p++)
+    assert.deepEqual(
+      Array.from(w.fog.seen[p]),
+      Array.from(ref[p]),
+      `grid vision diverged from brute force for player ${p}`,
+    );
+});

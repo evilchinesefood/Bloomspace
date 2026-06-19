@@ -35,6 +35,28 @@ export const VISION_R2 = VISION_R * VISION_R;
 export const FOG_TICKS = 5;
 export const UNKNOWN = -2;
 
+// --- Spatial grid for vision queries (cell size = VISION_R) -------------------------------------
+// Rebuilt fresh on every computeFog: rock positions are NOT static (moons orbit), so a once-built
+// grid would go stale. Cell size = VISION_R means every rock within VISION_R of a point lies in the
+// 3×3 cell block around that point — so restricting candidates to that block yields the IDENTICAL
+// seen[] set as a full O(rocks) scan (rocks outside the block are >VISION_R away and fail the test).
+const GRID_STRIDE = 100000; // > max cells per axis; the +1000 offset keeps keys non-negative
+function cellKey(cx, cy) {
+  return (cx + 1000) * GRID_STRIDE + (cy + 1000);
+}
+function buildVisionGrid(asts, nRocks) {
+  const grid = new Map(); // cellKey → array of live rock indices
+  for (let i = 0; i < nRocks; i++) {
+    const a = asts[i];
+    if (a.dead) continue; // dead rocks are neither a vision source nor a target
+    const key = cellKey(Math.floor(a.x / VISION_R), Math.floor(a.y / VISION_R));
+    let arr = grid.get(key);
+    if (!arr) grid.set(key, (arr = []));
+    arr.push(i);
+  }
+  return grid;
+}
+
 // initFog — allocate per-player seen/known arrays sized to the (fixed) rock count and run a first
 // computeFog so the world has valid visibility from tick 0. nPlayers spans 0..MAX_PLAYERS so a slot
 // always exists for every live owner id; known seeded to UNKNOWN (nothing seen yet).
@@ -69,6 +91,11 @@ export function computeFog(world) {
 
   for (let p = 0; p < nP; p++) fog.seen[p].fill(0);
 
+  // Spatial grid over CURRENT positions (see buildVisionGrid) — each vision source tests only the
+  // rocks in its 3×3 cell neighborhood instead of every rock. Identical result, far less work
+  // when the fleet is large.
+  const grid = buildVisionGrid(asts, nRocks);
+
   // Pass 1: owned-rock vision (incl. always-see-your-own).
   for (let p = 0; p < nP; p++) {
     const seen = fog.seen[p];
@@ -76,16 +103,24 @@ export function computeFog(world) {
       const src = asts[i];
       if (src.dead || src.owner !== p) continue;
       seen[i] = 1; // you always see your own
-      for (let r = 0; r < nRocks; r++) {
-        if (seen[r] || asts[r].dead) continue;
-        const dx = asts[r].x - src.x;
-        const dy = asts[r].y - src.y;
-        if (dx * dx + dy * dy <= VISION_R2) seen[r] = 1;
-      }
+      const cx = Math.floor(src.x / VISION_R);
+      const cy = Math.floor(src.y / VISION_R);
+      for (let gx = cx - 1; gx <= cx + 1; gx++)
+        for (let gy = cy - 1; gy <= cy + 1; gy++) {
+          const arr = grid.get(cellKey(gx, gy));
+          if (!arr) continue;
+          for (let q = 0; q < arr.length; q++) {
+            const r = arr[q];
+            if (seen[r]) continue;
+            const dx = asts[r].x - src.x;
+            const dy = asts[r].y - src.y;
+            if (dx * dx + dy * dy <= VISION_R2) seen[r] = 1;
+          }
+        }
     }
   }
 
-  // Pass 2: owned-fleet vision (one pass over the dense seedling SoA).
+  // Pass 2: owned-fleet vision (one walk of the dense seedling SoA, grid-pruned).
   const s = world.seed;
   for (let i = 0; i < s.count; i++) {
     const o = s.owner[i];
@@ -93,12 +128,20 @@ export function computeFog(world) {
     const seen = fog.seen[o];
     const sx = s.x[i];
     const sy = s.y[i];
-    for (let r = 0; r < nRocks; r++) {
-      if (seen[r] || asts[r].dead) continue;
-      const dx = asts[r].x - sx;
-      const dy = asts[r].y - sy;
-      if (dx * dx + dy * dy <= VISION_R2) seen[r] = 1;
-    }
+    const cx = Math.floor(sx / VISION_R);
+    const cy = Math.floor(sy / VISION_R);
+    for (let gx = cx - 1; gx <= cx + 1; gx++)
+      for (let gy = cy - 1; gy <= cy + 1; gy++) {
+        const arr = grid.get(cellKey(gx, gy));
+        if (!arr) continue;
+        for (let q = 0; q < arr.length; q++) {
+          const r = arr[q];
+          if (seen[r]) continue;
+          const dx = asts[r].x - sx;
+          const dy = asts[r].y - sy;
+          if (dx * dx + dy * dy <= VISION_R2) seen[r] = 1;
+        }
+      }
   }
 
   // Pass 3: refresh last-known owner for every currently-seen rock.

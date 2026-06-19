@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createWorld, OWNER_NEUTRAL, STATE } from "./World.js";
-import { sendSeedlings } from "./Seedlings.js";
+import { createWorld, OWNER_NEUTRAL, STATE, EVENT } from "./World.js";
+import { sendSeedlings, updateSeedlings } from "./Seedlings.js";
 import Sim from "./World.js";
 
 const PLAYERS = [
@@ -232,4 +232,51 @@ test("enemy arrival is governed by combat, not instant colonization", () => {
   // Combat is actually engaged: the fight kills seedlings over time.
   for (let i = 0; i < 1500; i++) Sim.step(w, 1 / 30);
   assert.ok(w.seed.count < startCount, "combat never resolved (no casualties)");
+});
+
+// --- unreachable target (regression: don't report a phantom dispatch) ---
+
+test("send to an unreachable target sends nothing and emits no SEND event", () => {
+  const w = mk();
+  const { home, neutral } = homeAndNeutral(w);
+  // Simulate a disconnected graph component: no first hop from home to the target.
+  w.nav[home.id][neutral.id] = -1;
+  const orbitingBefore = countOrbiting(w, home.id, 0);
+  assert.ok(orbitingBefore > 0, "home should have orbiters available to send");
+  const sent = sendSeedlings(w, home.id, neutral.id, 1, 0);
+  assert.equal(sent, 0, "no ships launch toward an unreachable target");
+  assert.equal(
+    countOrbiting(w, home.id, 0),
+    orbitingBefore,
+    "all ships stay in orbit when the target is unreachable",
+  );
+  let sendEvents = 0;
+  for (let k = 0; k < w.events.n; k++)
+    if (w.events.type[k] === EVENT.SEND) sendEvents++;
+  assert.equal(
+    sendEvents,
+    0,
+    "no confirm SEND event for a dispatch that didn't happen",
+  );
+});
+
+// --- SLING break-off when the center body dies (regression: t.dead guard parity) ---
+
+test("a SLING ship whose center body is destroyed breaks off into TRANSIT", () => {
+  const w = mk();
+  const s = w.seed;
+  const center = w.asteroids.find((a) => a.kind === "asteroid");
+  // Put seedling 0 into a slingshot arc around the center body.
+  s.state[0] = STATE.SLING;
+  s.target[0] = center.id;
+  s.slingRem[0] = 0.5;
+  // Destroy the center WITHOUT routing through destroyBody's same-tick reap loop.
+  center.dead = true;
+  updateSeedlings(w, 1 / 30);
+  assert.equal(
+    s.state[0],
+    STATE.TRANSIT,
+    "ship leaves the dead body instead of orbiting a corpse",
+  );
+  assert.equal(s.slingRem[0], 0, "sling remainder cleared on break-off");
 });

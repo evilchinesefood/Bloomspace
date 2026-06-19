@@ -129,7 +129,9 @@ export function deserialize(saved) {
     !saved ||
     saved.version !== SAVE_VERSION ||
     !saved.seed ||
-    !saved.seed.fields
+    !saved.seed.fields ||
+    !Array.isArray(saved.asteroids) ||
+    !Array.isArray(saved.players)
   )
     return null;
 

@@ -135,7 +135,9 @@ export function updateSeedlings(world, dt) {
       s.y[i] += (dy / d) * move;
     } else if (st === STATE.SLING) {
       const t = world.asteroids[s.target[i]];
-      if (!t) {
+      if (!t || t.dead) {
+        // Sling center vanished or its body was destroyed — break off into transit (mirrors
+        // the TRANSIT guard above; don't keep orbiting a corpse).
         s.state[i] = STATE.TRANSIT;
         s.slingRem[i] = 0;
         continue;
@@ -244,14 +246,16 @@ function breakOff(world, i, t) {
 // by player sends and tree-production rally routing. No-op if already home or unreachable.
 export function launchSeedling(world, i, dest) {
   const s = world.seed;
-  if (!dest || dest.dead || dest.id === s.home[i]) return; // dead target → no-op
+  if (!dest || dest.dead || dest.id === s.home[i]) return false; // dead/self target → no-op
   const hop = nextHop(world, s.home[i], dest.id);
+  if (hop < 0) return false; // unreachable: dest is in a disconnected graph component
   const node = world.asteroids[hop];
-  if (!node) return;
+  if (!node) return false;
   s.dest[i] = dest.id;
   s.target[i] = hop;
   s.state[i] = STATE.TRANSIT;
   aimAt(world, i, node);
+  return true; // a real launch happened
 }
 
 // setRally — set or clear an asteroid's rally (anchor) point. While a rally is set, the rock
@@ -275,10 +279,14 @@ const RALLY_INTERVAL = 0.35;
 // Arrivals re-home to the target (joinOrbit), so they aren't re-grabbed here — no loop.
 export function updateRally(world, dt) {
   const s = world.seed;
-  for (const rock of world.asteroids) {
+  const asts = world.asteroids;
+  // Pass 1 (O(asteroids)): advance cooldowns, clear invalid anchors, and collect the rocks whose
+  // cooldown elapsed THIS tick. No seedling scan here.
+  let firing = null;
+  for (const rock of asts) {
     if (!rock || rock.rally == null || rock.rally < 0 || rock.owner < 0)
       continue;
-    const tgt = world.asteroids[rock.rally];
+    const tgt = asts[rock.rally];
     if (!tgt || tgt.id === rock.id || tgt.dead) {
       rock.rally = -1;
       continue;
@@ -286,12 +294,23 @@ export function updateRally(world, dt) {
     rock.rallyCd = (rock.rallyCd ?? 0) - dt;
     if (rock.rallyCd > 0) continue;
     rock.rallyCd = RALLY_INTERVAL;
-    for (let i = 0; i < s.count; i++) {
-      if (s.state[i] !== STATE.ORBIT) continue;
-      if (s.home[i] !== rock.id || s.owner[i] !== rock.owner) continue;
-      if (s.kind[i] !== KIND.FIGHTER) continue; // keep defenders home
-      launchSeedling(world, i, tgt);
-    }
+    (firing ??= []).push({ rock, tgt });
+  }
+  if (!firing) return; // nothing fires this tick — skip the seedling scan entirely
+  // Pass 2: bucket ORBITing FIGHTERs by home in ONE pass over the SoA (only the homes firing this
+  // tick), then launch. Collapses the aligned-tick cost from O(firingRocks × seedcount) to
+  // O(seedcount). launchSeedling consumes no rng and each fighter is home'd at exactly one rock,
+  // so the result is order-independent and byte-identical to the old per-rock scan.
+  const buckets = []; // sparse: home rock id → array of seedling indices
+  for (const f of firing) buckets[f.rock.id] = [];
+  for (let i = 0; i < s.count; i++) {
+    if (s.state[i] !== STATE.ORBIT || s.kind[i] !== KIND.FIGHTER) continue;
+    const b = buckets[s.home[i]];
+    if (b) b.push(i);
+  }
+  for (const { rock, tgt } of firing) {
+    for (const i of buckets[rock.id])
+      if (s.owner[i] === rock.owner) launchSeedling(world, i, tgt); // keep defenders home
   }
 }
 
@@ -317,14 +336,19 @@ export function sendSeedlings(world, fromId, toId, fraction, owner) {
     }
   }
   const n = Math.floor(eligible.length * f);
-  for (let k = 0; k < n; k++) launchSeedling(world, eligible[k], target);
+  // Tally ACTUAL launches: an unreachable target (disconnected graph component, e.g. after a
+  // Brutal bombardment severs a cut-vertex body) makes launchSeedling return false and that
+  // slot stays in orbit — don't count it or fire the confirm event/SFX for a phantom dispatch.
+  let sent = 0;
+  for (let k = 0; k < n; k++)
+    if (launchSeedling(world, eligible[k], target)) sent++;
   // One SEND event per real dispatch, at the origin rock — the sanctioned send path for both
-  // human and AI, so AI sends get audio too. 0-send (floored fraction) emits nothing.
-  if (n > 0) {
+  // human and AI, so AI sends get audio too. 0-send (floored fraction OR all-unreachable) emits nothing.
+  if (sent > 0) {
     const from = world.asteroids[fromId];
     if (from) pushEvent(world, EVENT.SEND, from.x, from.y, owner);
   }
-  return n;
+  return sent;
 }
 
 export default { updateSeedlings, sendSeedlings };

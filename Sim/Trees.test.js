@@ -406,3 +406,51 @@ test("rally keeps defenders (kind 1) home while funneling fighters", () => {
     "rally wrongly funneled the defender away from home",
   );
 });
+
+// --- defense spawn at SoA capacity (regression: must not drain energy on a dropped spawn) ---
+
+test("defense tree at SoA capacity spawns no defender and spends no energy", () => {
+  const w = world();
+  const rock = ownedRock(w);
+  rock.energy = 100;
+  // A mature defense tree primed to fire this tick.
+  rock.trees.push({
+    type: "defense",
+    level: 1,
+    growth: 1,
+    cooldown: 0.0001,
+    flowerCd: 6,
+  });
+  // Fill the global seedling pool so spawnSeedling/spawnOrbiter returns -1 (at capacity).
+  w.seed.count = w.seed.capacity;
+  const countBefore = w.seed.count;
+  updateTrees(w, DT); // dt past the tiny cooldown → the defense tree fires
+  assert.equal(w.seed.count, countBefore, "no seedling spawned at capacity");
+  assert.equal(
+    rock.energy,
+    100,
+    "no energy spent when the spawn is dropped at capacity",
+  );
+});
+
+// Control: below capacity the same setup DOES spawn a defender and spend energy.
+test("defense tree below capacity spawns a defender and spends energy", () => {
+  const w = world();
+  const rock = ownedRock(w);
+  rock.energy = 100;
+  rock.trees.push({
+    type: "defense",
+    level: 1,
+    growth: 1,
+    cooldown: 0.0001,
+    flowerCd: 6,
+  });
+  const countBefore = w.seed.count;
+  updateTrees(w, DT);
+  assert.equal(
+    w.seed.count,
+    countBefore + 1,
+    "a defender should spawn below capacity",
+  );
+  assert.ok(rock.energy < 100, "energy spent on a real defender spawn");
+});

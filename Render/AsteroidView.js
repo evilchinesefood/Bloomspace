@@ -606,6 +606,7 @@ export function createAsteroidView(scene, world, camCtl, fx) {
   // dead body's neighbors), so its edges vanish. The buffer is allocated once at the initial
   // (max) edge count; the draw range shrinks when edges are dropped.
   let edgePairs = [];
+  let movingEdges = []; // indices into edgePairs whose endpoints include a moving (orbiting) body
   function buildEdgePairs() {
     edgePairs = [];
     for (let i = 0; i < n; i++) {
@@ -613,6 +614,13 @@ export function createAsteroidView(scene, world, camCtl, fx) {
       for (const j of rocks[i].neighbors || [])
         if (j > i && !rocks[j].dead) edgePairs.push([i, j]);
     }
+    // Index the edges with a moving endpoint so per-frame updates rewrite only those (mirrors
+    // writeLinks' per-edge gate). Rebuilt here because edgePairs is rebuilt on body death.
+    movingEdges = [];
+    if (hasMoving)
+      for (let e = 0; e < edgePairs.length; e++)
+        if (movingFlag[edgePairs[e][0]] || movingFlag[edgePairs[e][1]])
+          movingEdges.push(e);
   }
   buildEdgePairs();
   const netGeo = new THREE.BufferGeometry();
@@ -630,6 +638,25 @@ export function createAsteroidView(scene, world, camCtl, fx) {
       netPos[o + 5] = -2.2;
     }
     netGeo.setDrawRange(0, edgePairs.length * 2);
+  }
+  // writeNetMoving — rewrite ONLY the edges with a moving endpoint; static edges keep their buffer
+  // positions. Full writeNet() still runs at init + on the death rebuild path. No-op when no edge
+  // has a moving endpoint, so a moon-free map does zero per-frame net work.
+  function writeNetMoving() {
+    if (movingEdges.length === 0) return;
+    for (let m = 0; m < movingEdges.length; m++) {
+      const e = movingEdges[m];
+      const a = rocks[edgePairs[e][0]];
+      const b = rocks[edgePairs[e][1]];
+      const o = e * 6;
+      netPos[o] = a.x;
+      netPos[o + 1] = a.y;
+      netPos[o + 2] = -2.2;
+      netPos[o + 3] = b.x;
+      netPos[o + 4] = b.y;
+      netPos[o + 5] = -2.2;
+    }
+    netGeo.attributes.position.needsUpdate = true;
   }
   writeNet();
   netGeo.setAttribute("position", new THREE.BufferAttribute(netPos, 3));
@@ -714,6 +741,15 @@ export function createAsteroidView(scene, world, camCtl, fx) {
   scene.add(glow);
   const glowCol = new THREE.Color();
   const orbitCount = new Int32Array(n);
+  // updateGlow incremental-write tracking: only (re)write a rock's glow instance when an input
+  // (orbit count / owner / fog visibility) changes or it's a moving body. Sentinels: FORCE before
+  // the first write (and after leaving LOD) so a full rewrite re-fills the buffer; HIDDEN when the
+  // last write was the zero/hidden matrix.
+  const GLOW_FORCE = -2,
+    GLOW_HIDDEN = -1;
+  const lastGlowCount = new Int32Array(n).fill(GLOW_FORCE);
+  const lastGlowOwner = new Int32Array(n);
+  const lastGlowFog = new Int8Array(n);
 
   // --- Selection highlight (repositioned each frame so it tracks moving moons) ---
   const selRing = new THREE.Mesh(
@@ -955,8 +991,7 @@ export function createAsteroidView(scene, world, camCtl, fx) {
       }
       rockMesh.instanceMatrix.needsUpdate = true;
       rims.instanceMatrix.needsUpdate = true;
-      writeNet();
-      netGeo.attributes.position.needsUpdate = true;
+      writeNetMoving();
     }
     writeLinks();
 
@@ -1162,7 +1197,11 @@ export function createAsteroidView(scene, world, camCtl, fx) {
 
   function updateGlow() {
     if (!lodActive(camCtl)) {
-      if (glow.count !== 0) glow.count = 0;
+      if (glow.count !== 0) {
+        glow.count = 0;
+        // Force a full rewrite next time LOD activates — the instance buffer is now stale.
+        lastGlowCount.fill(GLOW_FORCE);
+      }
       return;
     }
     orbitCount.fill(0);
@@ -1181,18 +1220,36 @@ export function createAsteroidView(scene, world, camCtl, fx) {
         }
       }
     }
+    let matDirty = false,
+      colDirty = false;
     for (let i = 0; i < n; i++) {
       const a = rocks[i];
       // A destroyed body, OR (under fog) a rock the human can't currently SEE, emits no aggregate
       // glow — the orbiter count is live intel the human shouldn't read on a remembered/dark rock.
       if (a.dead || (world.fogOn && fogState(world, i) !== 2)) {
-        dummy.position.set(0, 0, 0);
-        dummy.scale.set(0, 0, 0);
-        dummy.updateMatrix();
-        glow.setMatrixAt(i, dummy.matrix);
+        if (lastGlowCount[i] !== GLOW_HIDDEN) {
+          dummy.position.set(0, 0, 0);
+          dummy.scale.set(0, 0, 0);
+          dummy.updateMatrix();
+          glow.setMatrixAt(i, dummy.matrix);
+          lastGlowCount[i] = GLOW_HIDDEN;
+          matDirty = true;
+        }
         continue;
       }
-      const k = Math.min(1, orbitCount[i] / 30);
+      // Visible: skip the rewrite unless an input changed. A static (non-moving) rock with the same
+      // orbiter count, owner and fog state renders identically — leave its buffer instance untouched
+      // (mirrors updateFogMask's incremental pattern; the big win at the zoomed-out aggregate view).
+      const fs = world.fogOn ? fogState(world, i) : 2;
+      const cnt = orbitCount[i];
+      if (
+        !movingFlag[i] &&
+        lastGlowCount[i] === cnt &&
+        lastGlowOwner[i] === a.owner &&
+        lastGlowFog[i] === fs
+      )
+        continue;
+      const k = Math.min(1, cnt / 30);
       const rr = a.radius * (1.4 + k * 2.6);
       dummy.position.set(a.x, a.y, 0);
       dummy.scale.set(rr, rr, 1);
@@ -1200,10 +1257,15 @@ export function createAsteroidView(scene, world, camCtl, fx) {
       glow.setMatrixAt(i, dummy.matrix);
       glowCol.setHex(ownerColorHex(a.owner)).multiplyScalar(0.25 + k * 0.75);
       glow.setColorAt(i, glowCol);
+      lastGlowCount[i] = cnt;
+      lastGlowOwner[i] = a.owner;
+      lastGlowFog[i] = fs;
+      matDirty = true;
+      colDirty = true;
     }
     glow.count = n;
-    glow.instanceMatrix.needsUpdate = true;
-    if (glow.instanceColor) glow.instanceColor.needsUpdate = true;
+    if (matDirty) glow.instanceMatrix.needsUpdate = true;
+    if (colDirty && glow.instanceColor) glow.instanceColor.needsUpdate = true;
   }
 
   // updateContest — split bar above each contested rock (≥2 owners have present strength).

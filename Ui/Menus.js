@@ -35,7 +35,13 @@ const el = (tag, props = {}, kids = []) => {
     if (k === "style") node.style.cssText = v;
     else if (k === "html") node.innerHTML = v;
     else if (k in node) node[k] = v;
-    else node.setAttribute(k, v);
+    else if (typeof v === "boolean") {
+      // Boolean attribute on a not-yet-upgraded custom element (e.g. wa-switch before Web
+      // Awesome defines it, so `k in node` is false): presence = true. setAttribute(k, false)
+      // would leave the attribute PRESENT as "false" (still truthy → ON), so add/remove instead.
+      if (v) node.setAttribute(k, "");
+      else node.removeAttribute(k);
+    } else node.setAttribute(k, v);
   }
   for (const c of [].concat(kids)) {
     if (c) node.append(c.nodeType ? c : document.createTextNode(c));
@@ -220,7 +226,7 @@ export function showStartMenu(
   card.append(
     el("div", {
       style: "margin-top:.8rem;font:600 .72rem system-ui;opacity:.72;",
-      textContent: "build v31",
+      textContent: "build v32",
     }),
   );
 
@@ -337,14 +343,14 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
   // the sim defaults OFF when config.events is absent (existing worlds/tests unaffected).
   const eventsSwitch = el("wa-switch", {
     textContent: "Environmental events",
-    checked: false, // hazards (flares + meteors) OFF by default — opt-in
+    // OFF by default (opt-in) — absent `checked` attribute = off; prefill() also sets it.
   });
 
   // Fog of war toggle. Default OFF — fog is a significant mode change (last-known visibility +
   // blind AI), so it's opt-in; the sim also defaults OFF when config.fog is absent.
   const fogSwitch = el("wa-switch", {
     textContent: "Fog of war",
-    checked: false,
+    // OFF by default (opt-in) — absent `checked` attribute = off; prefill() also sets it.
   });
 
   // Map size preset nudges the default asteroid count AND clamps the slider's max to a count

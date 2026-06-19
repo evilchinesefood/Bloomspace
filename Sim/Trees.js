@@ -139,6 +139,9 @@ export function updateTrees(world, dt) {
     const trees = rock.trees;
     // Compute defender cap once per rock (O(trees) not O(trees²)).
     const defCap = matureDefenseCount(rock) * DEFENDERS_PER_TREE;
+    // Live defenders home'd here — computed lazily on the first firing defense tree this tick
+    // and shared across them (avoids a full SoA rescan per firing tree). -1 = not yet counted.
+    let defNow = -1;
     for (let t = 0; t < trees.length; t++) {
       const tree = trees[t];
       if (tree.growth < 1) {
@@ -152,12 +155,19 @@ export function updateTrees(world, dt) {
         tree.cooldown -= dt;
         if (tree.cooldown <= 0) {
           tree.cooldown = DEFENSE_INTERVAL;
-          if (
-            defCap > 0 &&
-            defenderCount(world, rock.id, rock.owner) < defCap &&
-            spendEnergy(rock, DEFENDER_ENERGY_COST)
-          ) {
-            spawnOrbiter(world, rock, KIND.DEFENDER);
+          if (defCap > 0) {
+            if (defNow < 0) defNow = defenderCount(world, rock.id, rock.owner);
+            // Spawn FIRST, charge only on a real spawn — at the global SoA cap spawnOrbiter
+            // returns -1, and charging then would silently drain the rock for nothing (mirrors
+            // the seedling path below). The rock-can-afford gate stands in for the old
+            // spendEnergy() boolean guard (spendEnergy refuses when energy < cost).
+            if (defNow < defCap && rock.energy >= DEFENDER_ENERGY_COST) {
+              const i = spawnOrbiter(world, rock, KIND.DEFENDER);
+              if (i >= 0) {
+                spendEnergy(rock, DEFENDER_ENERGY_COST);
+                defNow++;
+              }
+            }
           }
         }
         continue;

@@ -228,6 +228,13 @@ export function createWorld(config = {}) {
     if (p.seeds === undefined) p.seeds = STARTING_SEEDS;
     initPlayerTech(p);
   }
+  // Invariant (mirrors asteroid.id===index): a player's id MUST equal its index in the array.
+  // Fog (Sim/Fog.js) and stepStats index per-player arrays directly by owner id for speed, so
+  // sparse/reordered ids would silently corrupt fog visibility + post-game stats. Fail fast here
+  // instead. Menus always builds contiguous 0..N players; this guards a future mode/setup.
+  for (let i = 0; i < world.players.length; i++)
+    if (world.players[i].id !== i)
+      throw new Error("player id must equal its index (fog/stats index by id)");
   // Terrain specials: regions live on world.nebulae (7a) + world.belts (7b); per-body tags on
   // rock.special. Default [] so consumers can read them unconditionally. generateMap (gated on
   // config.specials) fills them; plain {x,y,radius} numbers + string tags, JSON-serializable for

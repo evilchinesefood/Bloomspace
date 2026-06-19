@@ -971,6 +971,10 @@ export function createHud(root, api) {
     warnBanner.remove();
     minimap.destroy();
     window.removeEventListener("keydown", onKey);
+    // Release the module-scope player cache so it doesn't pin the finished match's players
+    // array across the menu/gameover gap (rebuilt on the next match's first playerById()).
+    _pArr = null;
+    _pById = null;
   }
 
   return { update, refreshSpeed, destroy, dom: { bar, panel } };

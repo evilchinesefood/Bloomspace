@@ -293,3 +293,22 @@ test("binary pairs stay locked diametrically opposite their shared centre", () =
   const ds = dist(sec, { x: prim.orbitCx, y: prim.orbitCy });
   assert.ok(Math.abs(dp - ds) < 1, "binary members at unequal radii");
 });
+
+// --- player id===index invariant (regression: fog/stats index by id) ---
+
+test("createWorld throws when a player id is not its array index", () => {
+  assert.throws(
+    () =>
+      createWorld({
+        seed: 1,
+        asteroidCount: 14,
+        players: [
+          { id: 0, isAi: false, difficulty: 0 },
+          { id: 5, isAi: true, difficulty: 1 }, // sparse id ≠ index 1
+        ],
+        width: 2000,
+        height: 2000,
+      }),
+    /player id must equal its index/,
+  );
+});

@@ -1,6 +1,6 @@
 // Sw.js — service worker. Cache-first with network fallback.
 // IMPORTANT: bump CACHE_VERSION on EVERY deploy or clients keep stale assets.
-const CACHE_VERSION = "bloomspace-v31";
+const CACHE_VERSION = "bloomspace-v32";
 
 // App shell + heavy vendored deps. Web Awesome statically imports a graph of chunks from
 // its loader and also lazy-loads component chunks on demand; that recursive chunk graph is
@@ -119,7 +119,15 @@ self.addEventListener("fetch", (event) => {
           }
           return res;
         })
-        .catch(() => cached);
+        .catch(() =>
+          // Network failed (offline) and the resource wasn't cached above. For a navigation,
+          // boot the cached app shell so the PWA still launches; otherwise return an explicit
+          // 504 so respondWith never resolves to undefined (which surfaces as a confusing hard
+          // network error). `cached` is always undefined here — the cache hit returned at line 111.
+          req.mode === "navigate"
+            ? caches.match("Index.html")
+            : new Response("", { status: 504, statusText: "Offline" }),
+        );
     }),
   );
 });

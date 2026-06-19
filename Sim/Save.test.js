@@ -383,3 +383,15 @@ test("SEED_FIELDS exactly matches makeSeedArrays' typed-array fields", () => {
     "SEED_FIELDS drifted from makeSeedArrays — update both together",
   );
 });
+
+// --- corrupt-save guards (regression: total no-throw contract) ---
+
+test("deserialize returns null for a structurally-invalid save (non-array asteroids/players)", () => {
+  const good = serialize(makeWorld());
+  assert.ok(deserialize(good), "a valid save still deserializes");
+  // Missing or non-array asteroids/players → null (the documented contract), not a TypeError.
+  assert.equal(deserialize({ ...good, asteroids: undefined }), null);
+  assert.equal(deserialize({ ...good, asteroids: "nope" }), null);
+  assert.equal(deserialize({ ...good, players: undefined }), null);
+  assert.equal(deserialize({ ...good, players: 42 }), null);
+});

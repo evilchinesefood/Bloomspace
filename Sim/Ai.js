@@ -186,22 +186,6 @@ export function effBombKnobs(player) {
   };
 }
 
-// Count ORBITing seedlings of `owner` home'd at `rockId` — the pool a send can draw from.
-// Orbit-only (unlike Trees.homedCount, which counts all states for the defender cap).
-function deployableAt(world, rockId, owner) {
-  const s = world.seed;
-  let n = 0;
-  for (let i = 0; i < s.count; i++) {
-    if (
-      s.home[i] === rockId &&
-      s.owner[i] === owner &&
-      s.state[i] === STATE.ORBIT
-    )
-      n++;
-  }
-  return n;
-}
-
 const dist2 = (a, b) => {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
@@ -302,15 +286,6 @@ const BOMB_KNOBS = [
   { buildEnergy: 130, buildBuffer: 45, planEvery: 3, fireEvery: 1 }, // Hard
   { buildEnergy: 110, buildBuffer: 30, planEvery: 2, fireEvery: 1 }, // Brutal
 ];
-// Count ORBITing seedlings of any owner home'd at a rock — the "strength" proxy for targeting.
-function orbitersAt(world, rockId) {
-  const s = world.seed;
-  let n = 0;
-  for (let i = 0; i < s.count; i++)
-    if (s.home[i] === rockId && s.state[i] === STATE.ORBIT) n++;
-  return n;
-}
-
 // True if any neighbor of `rock` is held by a live enemy of `id`. Under fog this reads each
 // neighbor's LAST-KNOWN owner (aiOwner): an unknown neighbor is treated as not-an-enemy (the AI
 // can't know it's hostile), and a stale-known enemy still counts (the AI plays safe on memory).
@@ -369,14 +344,14 @@ function pickBatteryHost(world, owned, id) {
 
 // Pick the human (player 0) target rock to bombard: most orbiters, then most energy, then lowest
 // id (all rng-free). Falls back to any live habitable player-0 rock. Returns null if none.
-function pickBombTarget(world) {
+function pickBombTarget(world, orbAny) {
   const asts = world.asteroids;
   let best = null;
   let bestO = -1;
   for (let i = 0; i < asts.length; i++) {
     const a = asts[i];
     if (a.dead || a.owner !== 0 || !a.habitable) continue;
-    const o = orbitersAt(world, a.id);
+    const o = orbAny[a.id];
     if (
       o > bestO ||
       (o === bestO && best && a.energy > best.energy) ||
@@ -393,7 +368,7 @@ function pickBombTarget(world) {
 // rock (chosen in decide so normal planting can leave that rock alone to bank energy), then fires
 // it at the human's strongest rock. Paced by per-player decision counters. Returns the host rock
 // id while a battery is being BUILT there (so decide skips it for normal trees), else -1.
-function maybeBombard(world, player, host, bk) {
+function maybeBombard(world, player, host, bk, orbAny) {
   if (!bk) return -1; // Easy: no bombard
   const id = player.id;
 
@@ -410,7 +385,7 @@ function maybeBombard(world, player, host, bk) {
   if (armed) {
     player._bombFireTick = (player._bombFireTick | 0) + 1;
     if (player._bombFireTick % bk.fireEvery === 0) {
-      const target = pickBombTarget(world);
+      const target = pickBombTarget(world, orbAny);
       if (target && fireBombard(world, armed.id, target.id, id))
         player._bombFires = (player._bombFires | 0) + 1;
     }
@@ -456,6 +431,24 @@ function decide(world, player) {
     if (asts[i].owner === id && !asts[i].dead) owned.push(asts[i]);
   if (owned.length === 0) return 0; // wiped — nothing to command
 
+  // Aggregate ORBIT counts in a SINGLE pass (was a full-SoA rescan per owned rock for the
+  // deployable pool, plus another per player-0 rock for bombard targeting). asteroid.id===index,
+  // so index the per-rock counters directly. Built per-decide (NOT once per tick) because an
+  // earlier AI's sendSeedlings this tick can move ships out of orbit, and BEFORE any world.rng()
+  // call so the rng draw order stays byte-identical to the old per-rock scans.
+  const orbAny = new Int32Array(asts.length); // ORBITing seedlings home'd at each rock, any owner
+  const orbMine = new Int32Array(asts.length); // ...owned by this AI (its deployable pool)
+  {
+    const s = world.seed;
+    for (let i = 0; i < s.count; i++) {
+      if (s.state[i] !== STATE.ORBIT) continue;
+      const h = s.home[i];
+      if (h < 0 || h >= orbAny.length) continue;
+      orbAny[h]++;
+      if (s.owner[i] === id) orbMine[h]++;
+    }
+  }
+
   // Bombard battery program — same develop gate (Easy never builds). Run FIRST so it can reserve
   // its committed host rock; normal tree-planting then skips that rock, letting it bank the energy
   // a battery needs. Rng-free + buffered so it never starves expansion. Returns the reserved host
@@ -463,7 +456,7 @@ function decide(world, player) {
   let reserved = -1;
   if (k.plant && owned.length >= 2) {
     const bombHost = pickBatteryHost(world, owned, id);
-    reserved = maybeBombard(world, player, bombHost, bk);
+    reserved = maybeBombard(world, player, bombHost, bk, orbAny);
   }
 
   // Plant on a strong owned rock first (growth → more seedlings over time). Skip the reserved
@@ -490,7 +483,7 @@ function decide(world, player) {
   let from = null;
   let pool = 0;
   for (let i = 0; i < owned.length; i++) {
-    const n = deployableAt(world, owned[i].id, id);
+    const n = orbMine[owned[i].id];
     if (n > pool) {
       pool = n;
       from = owned[i];
