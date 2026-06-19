@@ -39,6 +39,21 @@ function setHtml(el, html) {
 function setProp(el, key, val) {
   if (el[key] !== val) el[key] = val;
 }
+// Styled hover tooltip (Web Awesome) for a button — replaces the native `title` (the default
+// browser popover). tip() tags the button with an id, returns a <wa-tooltip for=…> to append near
+// it; setTip() retunes the text (guarded so it doesn't thrash every frame).
+let _tipN = 0;
+function tip(forBtn, text) {
+  const id = "BsTip" + ++_tipN;
+  forBtn.id = id;
+  return el("wa-tooltip", { for: id, placement: "right" }, [text || ""]);
+}
+function setTip(tt, text) {
+  if (tt && tt._txt !== text) {
+    tt._txt = text;
+    tt.textContent = text;
+  }
+}
 
 function ownedRocks(world, owner) {
   let n = 0;
@@ -550,6 +565,9 @@ export function createHud(root, api) {
   const upgEnergyBtn = mkUpgBtn(UPGRADE.ENERGY, "warning");
   const upgStrBtn = mkUpgBtn(UPGRADE.STRENGTH, "danger");
   const upgSpdBtn = mkUpgBtn(UPGRADE.SPEED, "brand");
+  upgEnergyBtn._tip = tip(upgEnergyBtn, "");
+  upgStrBtn._tip = tip(upgStrBtn, "");
+  upgSpdBtn._tip = tip(upgSpdBtn, "");
   const upgRow = el(
     "div",
     {
@@ -588,6 +606,8 @@ export function createHud(root, api) {
   });
   plantSeedBtn.addEventListener("click", () => api.onPlant("seedling"));
   plantDefBtn.addEventListener("click", () => api.onPlant("defense"));
+  plantSeedBtn._tip = tip(plantSeedBtn, "");
+  plantDefBtn._tip = tip(plantDefBtn, "");
 
   // Plant Bombard Tree — escalating cost per current count, capped at BATTERY_SIZE. Five mature
   // bombard trees arm the rock as a superweapon battery.
@@ -597,6 +617,7 @@ export function createHud(root, api) {
     html: '<i slot="start" class="fa-solid fa-meteor"></i>Plant Bombard Tree',
   });
   plantBombBtn.addEventListener("click", () => api.onPlant("bombard"));
+  plantBombBtn._tip = tip(plantBombBtn, "");
 
   // Bombard battery status line (count / mature / armed / charging).
   const bombStatusEl = el("div", {
@@ -610,12 +631,14 @@ export function createHud(root, api) {
     size: "small",
     variant: "danger",
     style: "width:100%;margin-bottom:.4rem;",
-    title:
-      "Fire the armed bombard battery: click, then pick an enemy rock to destroy it.",
     html: '<i slot="start" class="fa-solid fa-crosshairs"></i>Fire battery',
   });
   fireBtn.addEventListener("click", () =>
     api.setFireMode(!(api.isFireMode && api.isFireMode())),
+  );
+  fireBtn._tip = tip(
+    fireBtn,
+    "Fire the armed bombard battery: click, then pick an enemy rock to destroy it.",
   );
 
   // Rally (anchor) point: arms a one-click target pick; new seedlings produced here then
@@ -623,12 +646,14 @@ export function createHud(root, api) {
   const rallyBtn = el("wa-button", {
     size: "small",
     style: "width:100%;margin-bottom:.4rem;",
-    title:
-      "Set a rally point: click, then pick a target body. New seedlings born here auto-travel there. Click this rock again to clear it.",
     html: '<i slot="start" class="fa-solid fa-location-crosshairs"></i>Set Rally Point',
   });
   rallyBtn.addEventListener("click", () =>
     api.setRallyMode(!api.isRallyMode()),
+  );
+  rallyBtn._tip = tip(
+    rallyBtn,
+    "Set a rally point: click, then pick a target body. Seedlings here (fighters AND defenders) auto-travel there. Click this rock again to clear it.",
   );
 
   // Manual connection: build a permanent travel link to another body you control (costs
@@ -636,23 +661,25 @@ export function createHud(root, api) {
   const connectBtn = el("wa-button", {
     size: "small",
     style: "width:100%;margin-bottom:.4rem;",
-    title: `Build a permanent one-way travel link to another body you own: click, then pick it. Costs ${CONNECT_ENERGY_COST} energy from this rock.`,
     html: '<i slot="start" class="fa-solid fa-link"></i>Build Connection',
   });
   connectBtn.addEventListener("click", () =>
     api.setConnectMode(!api.isConnectMode()),
   );
+  connectBtn._tip = tip(connectBtn, "");
 
   // Inbound-rally view (toggle, also bound to the 'i' key): shows which OTHER bodies have
   // their rally set TO the selected body, instead of this body's own outbound rally.
   const inboundBtn = el("wa-button", {
     size: "small",
     style: "width:100%;margin-bottom:.4rem;",
-    title:
-      "Show which other bodies have set their rally point TO this rock (also toggled with the 'i' key).",
     html: '<i slot="start" class="fa-solid fa-arrow-right-to-bracket"></i>Inbound rallies',
   });
   inboundBtn.addEventListener("click", () => api.toggleInbound());
+  inboundBtn._tip = tip(
+    inboundBtn,
+    "Show which other bodies have set their rally point TO this rock (also toggled with the 'i' key).",
+  );
 
   const hint = el("div", {
     style: "margin-top:.6rem;font:500 .76rem system-ui;opacity:.72;",
@@ -681,6 +708,17 @@ export function createHud(root, api) {
     connectBtn,
     inboundBtn,
     hint,
+    // Styled hover tooltips (anchored by id via `for`) — DOM position doesn't matter.
+    upgEnergyBtn._tip,
+    upgStrBtn._tip,
+    upgSpdBtn._tip,
+    plantSeedBtn._tip,
+    plantDefBtn._tip,
+    plantBombBtn._tip,
+    fireBtn._tip,
+    rallyBtn._tip,
+    connectBtn._tip,
+    inboundBtn._tip,
   );
 
   // Render the panel for a given asteroid id (or hide if id<0).
@@ -781,9 +819,12 @@ export function createHud(root, api) {
         // The button is colored by its WA variant; the label is just the stat. Cost + tier + effect
         // live in the hover tooltip (tier count shows the per-body cap, e.g. 2/2 on a small rock).
         setHtml(btn, `${label}${maxed ? " ✓" : ""}`);
-        btn.title = maxed
-          ? `${label} fully upgraded (${cap}/${cap}) — ${effect}.`
-          : `Upgrade ${label} for ${cost} seeds → tier ${tier + 1}/${cap} (${effect})${afford ? "" : " — not enough seeds"}.`;
+        setTip(
+          btn._tip,
+          maxed
+            ? `${label} fully upgraded (${cap}/${cap}) — ${effect}.`
+            : `Upgrade ${label} for ${cost} seeds → tier ${tier + 1}/${cap} (${effect})${afford ? "" : " — not enough seeds"}.`,
+        );
       }
     }
 
@@ -806,8 +847,14 @@ export function createHud(root, api) {
       const costTxt = affordable
         ? `Costs ${TREE_SEED_COST} seeds + ${TREE_ENERGY_COST} energy.`
         : `Need ${TREE_SEED_COST} seeds + ${TREE_ENERGY_COST} energy.`;
-      plantSeedBtn.title = `Plant a seedling tree — grows fighters that orbit this rock and can be sent to attack or defend. ${costTxt}`;
-      plantDefBtn.title = `Plant a defense tree — spawns defenders that guard this rock (more mature defense trees → more defenders). ${costTxt}`;
+      setTip(
+        plantSeedBtn._tip,
+        `Plant a seedling tree — grows fighters that orbit this rock and can be sent to attack or defend. ${costTxt}`,
+      );
+      setTip(
+        plantDefBtn._tip,
+        `Plant a defense tree — spawns defenders that guard this rock (more mature defense trees → more defenders). ${costTxt}`,
+      );
 
       // --- Bombard battery: plant button (count N/5 + escalating cost), status, FIRE button ---
       const bcount = countBombard(a);
@@ -824,9 +871,12 @@ export function createHud(root, api) {
           ? `<i slot="start" class="fa-solid fa-meteor"></i>Battery full`
           : `<i slot="start" class="fa-solid fa-meteor"></i>Plant Bombard Tree`,
       );
-      plantBombBtn.title = bfull
-        ? `Battery full — ${BATTERY_SIZE} bombard trees planted and ready to fire.`
-        : `Plant bombard tree ${bcount + 1}/${BATTERY_SIZE} for ${bSeedCost} seeds + ${bEnergyCost} energy. ${BATTERY_SIZE} mature trees arm a battery that destroys an enemy rock.${bAfford ? "" : " (Not enough resources.)"}`;
+      setTip(
+        plantBombBtn._tip,
+        bfull
+          ? `Battery full — ${BATTERY_SIZE} bombard trees planted and ready to fire.`
+          : `Plant bombard tree ${bcount + 1}/${BATTERY_SIZE} for ${bSeedCost} seeds + ${bEnergyCost} energy. ${BATTERY_SIZE} mature trees arm a battery that destroys an enemy rock.${bAfford ? "" : " (Not enough resources.)"}`,
+      );
 
       const mature = matureBombardCount(a);
       const armed = isArmed(a);
@@ -876,17 +926,18 @@ export function createHud(root, api) {
         "disabled",
         !connecting && a.energy < CONNECT_ENERGY_COST,
       );
-      connectBtn.title = `Build a permanent one-way travel link to another body you own (costs ${CONNECT_ENERGY_COST} energy): click, then pick the target.${a.energy < CONNECT_ENERGY_COST ? " Not enough energy." : ""}`;
       setHtml(
         connectBtn,
         connecting
           ? '<i slot="start" class="fa-solid fa-xmark"></i>Cancel connection'
-          : `<i slot="start" class="fa-solid fa-link"></i>Build Connection (−${CONNECT_ENERGY_COST}⚡)`,
+          : '<i slot="start" class="fa-solid fa-link"></i>Build Connection',
       );
-      connectBtn.title =
+      setTip(
+        connectBtn._tip,
         a.energy < CONNECT_ENERGY_COST
-          ? `Needs ${CONNECT_ENERGY_COST} stored energy on this body`
-          : `Link to another body you control for ${CONNECT_ENERGY_COST} energy`;
+          ? `Build a one-way travel link to another body you control — needs ${CONNECT_ENERGY_COST} stored energy here (you have ${Math.floor(a.energy)}).`
+          : `Build a one-way travel link to another body you control: click, then pick the target. Costs ${CONNECT_ENERGY_COST} energy from this rock.`,
+      );
       hint.textContent = firing
         ? "Click any body to bombard it — Esc to cancel."
         : arming

@@ -607,8 +607,8 @@ export function addConnection(world, i, j) {
   return true;
 }
 
-// Manual connections cost a significant chunk of the source body's stored energy.
-export const CONNECT_ENERGY_COST = 80;
+// Manual connections cost a chunk of the source body's stored energy.
+export const CONNECT_ENERGY_COST = 40;
 
 // tryConnect — player-driven link between two bodies they BOTH control. Enforces ownership,
 // no-duplicate, and the energy cost (paid from the source body). Returns true on success.
