@@ -118,6 +118,21 @@ export function plantTree(world, asteroidId, type, owner) {
   return true;
 }
 
+// clearTrees — remove ALL trees from an owned rock so the player can repurpose it. No refund
+// (planting already spent the resources). Cancels any bombard charge + armed state too (mirrors a
+// destroyed body's cleanup), so a cleared rock isn't left armed with no battery. Returns the count
+// removed (0 = no-op: not owned, dead, or already bare). Deterministic — consumes no world.rng.
+export function clearTrees(world, asteroidId, owner) {
+  const rock = world.asteroids[asteroidId];
+  if (!rock || rock.dead || rock.owner !== owner) return 0;
+  const n = rock.trees ? rock.trees.length : 0;
+  if (n === 0) return 0;
+  rock.trees = [];
+  rock.bombard = undefined;
+  rock.armed = false;
+  return n;
+}
+
 function spawnOrbiter(world, rock, kind = KIND.FIGHTER) {
   return spawnSeedling(world, {
     home: rock.id,
@@ -201,4 +216,4 @@ export function updateTrees(world, dt) {
   }
 }
 
-export default { plantTree, updateTrees };
+export default { plantTree, clearTrees, updateTrees };

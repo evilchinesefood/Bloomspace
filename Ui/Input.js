@@ -7,7 +7,7 @@
 // All select highlight + drag indicator visuals come from Render (already built).
 import { sendSeedlings, setRally } from "../Sim/Seedlings.js";
 import { tryConnect } from "../Sim/MapGen.js";
-import { plantTree } from "../Sim/Trees.js";
+import { plantTree, clearTrees as clearTreesSim } from "../Sim/Trees.js";
 import { fireBombard, isArmed } from "../Sim/Bombard.js";
 import { buyTech } from "../Sim/Tech.js";
 import { buyUpgrade } from "../Sim/Upgrade.js";
@@ -238,6 +238,15 @@ export function createInput({
     return buyUpgrade(world, id, stat, HUMAN);
   }
 
+  // Clear all trees on the selected owned rock so it can be repurposed. Owns-rock guard + no-op
+  // on a bare rock live inside clearTrees; returns true only when something was actually removed.
+  function clearTrees() {
+    const world = getWorld();
+    const id = selectedId();
+    if (id < 0 || !world || !world.asteroids[id]) return false;
+    return clearTreesSim(world, id, HUMAN) > 0;
+  }
+
   // Escape cancels an armed rally / connect pick (the banner tells the player this is there).
   function onKey(e) {
     if (e.key === "Escape") {
@@ -266,6 +275,7 @@ export function createInput({
     plant,
     tech,
     upgrade,
+    clearTrees,
     selectedId,
     setRallyMode,
     isRallyMode,

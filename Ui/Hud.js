@@ -619,6 +619,23 @@ export function createHud(root, api) {
   plantBombBtn.addEventListener("click", () => api.onPlant("bombard"));
   plantBombBtn._tip = tip(plantBombBtn, "");
 
+  // Clear all trees on the selected rock so it can be repurposed (no refund). Shown only when the
+  // rock actually has trees.
+  const clearTreesBtn = el("wa-button", {
+    size: "small",
+    appearance: "outlined",
+    style: "width:100%;margin-bottom:.4rem;",
+    html: '<i slot="start" class="fa-solid fa-trash-can"></i>Clear Trees',
+  });
+  clearTreesBtn.addEventListener(
+    "click",
+    () => api.onClearTrees && api.onClearTrees(),
+  );
+  clearTreesBtn._tip = tip(
+    clearTreesBtn,
+    "Remove ALL trees on this rock so you can build something else here. No refund.",
+  );
+
   // Bombard battery status line (count / mature / armed / charging).
   const bombStatusEl = el("div", {
     style: "margin-bottom:.4rem;font:600 .8rem system-ui;",
@@ -703,6 +720,7 @@ export function createHud(root, api) {
     plantDefBtn,
     plantBombBtn,
     bombStatusEl,
+    clearTreesBtn,
     fireBtn,
     rallyBtn,
     connectBtn,
@@ -715,6 +733,7 @@ export function createHud(root, api) {
     plantSeedBtn._tip,
     plantDefBtn._tip,
     plantBombBtn._tip,
+    clearTreesBtn._tip,
     fireBtn._tip,
     rallyBtn._tip,
     connectBtn._tip,
@@ -834,6 +853,8 @@ export function createHud(root, api) {
     plantDefBtn.style.display = owned ? "" : "none";
     plantBombBtn.style.display = owned ? "" : "none";
     bombStatusEl.style.display = owned ? "" : "none";
+    clearTreesBtn.style.display =
+      owned && a.trees && a.trees.length > 0 ? "" : "none";
     fireBtn.style.display = "none"; // shown below only when owned + armed + not charging
     rallyBtn.style.display = owned ? "" : "none";
     connectBtn.style.display = owned ? "" : "none";

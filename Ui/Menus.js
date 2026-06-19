@@ -241,7 +241,7 @@ export function showStartMenu(
   card.append(
     el("div", {
       style: "margin-top:.8rem;font:600 .72rem system-ui;opacity:.72;",
-      textContent: "build v35",
+      textContent: "build v36",
     }),
   );
 
@@ -561,12 +561,9 @@ function sparkline(history, playerCount, w = 280, h = 72) {
 function statsBlock(stats, players) {
   if (!stats) return null;
   const n = players.length;
-  // kills[p] ≈ sum of all opponent deaths (approximation — events don't record the killer).
-  const kills = players.map((_, p) => {
-    let k = 0;
-    for (let q = 0; q < n; q++) if (q !== p) k += stats.deaths[q];
-    return k;
-  });
+  // Real kills — attributed in combat to the strongest enemy at each dying ship's body
+  // (stats.kills). Old saves without the field fall back to 0.
+  const kills = players.map((_, p) => (stats.kills ? stats.kills[p] | 0 : 0));
   const wrap = el("div", { style: "margin:.9rem 0 1.2rem;text-align:left;" });
 
   // Human row — prominent.

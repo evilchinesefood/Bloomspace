@@ -27,6 +27,7 @@ export function initStats(world) {
     captures: new Array(n).fill(0),
     deaths: new Array(n).fill(0),
     peakFleet: new Array(n).fill(0),
+    kills: new Array(n).fill(0), // enemy ships destroyed (credited in Combat to the real killer)
   };
   world.history = [];
 }

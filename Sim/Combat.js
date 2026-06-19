@@ -176,9 +176,31 @@ export function resolveCombat(world, dt) {
 
   // Deaths + COMBAT/ORBIT tint, after ALL damage (kept order-independent / deterministic).
   // Don't kill mid-scan — compaction below swap-removes the DEAD in a safe descending pass.
+  const stats = world.stats;
   for (let i = 0; i < s.count; i++) {
-    if (s.energy[i] <= 0) s.state[i] = STATE.DEAD;
-    else if (s.state[i] !== STATE.TRANSIT && s.state[i] !== STATE.SLING)
+    if (s.energy[i] <= 0) {
+      // Attribute this combat kill to the strongest ENEMY side present at the dying ship's body
+      // (real kills — NOT "everyone else's deaths"). A pure-TRANSIT fly-by death has no stable
+      // body to credit → left uncredited (rare). Stats-only: consumes no rng, order-independent.
+      if (stats && stats.kills && s.state[i] !== STATE.TRANSIT) {
+        const h = bodyOf(i);
+        if (h >= 0 && h < A) {
+          const o = s.owner[i];
+          let best = -1;
+          let bestStr = 0;
+          for (let r = 0; r < MAXO; r++) {
+            if (r === o) continue;
+            const rs = strAt[h * MAXO + r];
+            if (rs > bestStr) {
+              bestStr = rs;
+              best = r;
+            }
+          }
+          if (best >= 0) stats.kills[best]++;
+        }
+      }
+      s.state[i] = STATE.DEAD;
+    } else if (s.state[i] !== STATE.TRANSIT && s.state[i] !== STATE.SLING)
       s.state[i] = engaged[i] ? STATE.COMBAT : STATE.ORBIT;
   }
 

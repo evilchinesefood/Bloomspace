@@ -4,6 +4,7 @@ import { createWorld, STARTING_SEEDS, OWNER_NEUTRAL, KIND } from "./World.js";
 import Sim from "./World.js";
 import {
   plantTree,
+  clearTrees,
   updateTrees,
   TREE_SEED_COST,
   TREE_ENERGY_COST,
@@ -83,6 +84,32 @@ test("plantTree fails when not enough energy", () => {
   assert.equal(plantTree(w, rock.id, "seedling", 0), false);
   assert.equal(rock.trees.length, 0);
   assert.equal(w.players[0].seeds, seeds0, "seeds untouched on failure");
+});
+
+// --- clearTrees -------------------------------------------------------------
+
+test("clearTrees removes all trees on an owned rock + cancels its battery; no-ops otherwise", () => {
+  const w = world();
+  const rock = ownedRock(w);
+  rock.energy = 9999;
+  w.players[0].seeds = 9999;
+  assert.ok(plantTree(w, rock.id, "seedling", 0));
+  assert.ok(plantTree(w, rock.id, "defense", 0));
+  // Simulate an in-progress / armed battery so we can prove clearing cancels it.
+  rock.bombard = { target: 1, charge: 50 };
+  rock.armed = true;
+  const before = rock.trees.length;
+  assert.ok(before >= 2, "rock has trees to clear");
+
+  assert.equal(clearTrees(w, rock.id, 0), before, "returns the count removed");
+  assert.equal(rock.trees.length, 0, "all trees gone");
+  assert.equal(rock.bombard, undefined, "bombard charge cancelled");
+  assert.equal(rock.armed, false, "armed state cleared");
+
+  assert.equal(clearTrees(w, rock.id, 0), 0, "already-bare rock → 0 (no-op)");
+  rock.trees.push({ type: "seedling", growth: 1 });
+  assert.equal(clearTrees(w, rock.id, 1), 0, "non-owner can't clear → 0");
+  assert.equal(rock.trees.length, 1, "non-owner clear left trees intact");
 });
 
 // --- Seedling tree production ----------------------------------------------

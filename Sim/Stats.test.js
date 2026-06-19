@@ -43,6 +43,8 @@ test("createWorld initializes stats + history", () => {
   assert.deepEqual(w.stats.captures, [0, 0]);
   assert.deepEqual(w.stats.deaths, [0, 0]);
   assert.deepEqual(w.stats.peakFleet, [0, 0]);
+  assert.equal(w.stats.kills.length, w.players.length);
+  assert.deepEqual(w.stats.kills, [0, 0]);
 });
 
 // --- 2. DETERMINISM ----------------------------------------------------------
@@ -60,6 +62,7 @@ test("same seed ⇒ identical history + stats after N ticks", () => {
   assert.deepEqual(wa.stats.captures, wb.stats.captures);
   assert.deepEqual(wa.stats.deaths, wb.stats.deaths);
   assert.deepEqual(wa.stats.peakFleet, wb.stats.peakFleet);
+  assert.deepEqual(wa.stats.kills, wb.stats.kills);
 });
 
 // --- 3. BOUNDED HISTORY ------------------------------------------------------
@@ -122,6 +125,33 @@ test("deaths counter increments on EVENT.DEATH", () => {
   assert.ok(
     w.stats.deaths[0] >= before + 2,
     "player 0 death count increased by 2+",
+  );
+});
+
+// Regression: the end screen used to credit each player with EVERY OTHER player's deaths, so a
+// player wiped out early showed thousands of "kills". Real kills are credited in Combat to the
+// killer, so total kills can never exceed total deaths.
+test("kills are attributed to real combatants and never exceed total deaths", () => {
+  const w = mk(7, 20, [
+    { id: 0, isAi: true, difficulty: 2 },
+    { id: 1, isAi: true, difficulty: 2 },
+    { id: 2, isAi: true, difficulty: 2 },
+  ]);
+  for (let t = 0; t < 3000; t++) step(w, DT);
+  assert.equal(w.stats.kills.length, 3);
+  const totalKills = w.stats.kills.reduce((a, b) => a + b, 0);
+  const totalDeaths = w.stats.deaths.reduce((a, b) => a + b, 0);
+  assert.ok(
+    totalDeaths > 0,
+    "3 Hard AIs should produce deaths over 3000 ticks",
+  );
+  assert.ok(
+    totalKills > 0,
+    "combat deaths at a body should attribute some kills",
+  );
+  assert.ok(
+    totalKills <= totalDeaths,
+    `kills (${totalKills}) must not exceed deaths (${totalDeaths})`,
   );
 });
 
@@ -209,6 +239,7 @@ test("serialize → deserialize preserves stats + history", () => {
     w1.stats.peakFleet,
     "peakFleet restored",
   );
+  assert.deepEqual(w2.stats.kills, w1.stats.kills, "kills restored");
   assert.deepEqual(w2.history, w1.history, "history restored");
 
   // Stepping after restore continues accumulating.

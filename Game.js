@@ -268,6 +268,13 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
       if (ok) sound.play("plant");
       return ok;
     },
+    // Clear-trees wrapper: removes every tree on the selected rock so it can be repurposed.
+    // Plays the death/poof cue on a real clear (a removal, not a build).
+    clearTrees: () => {
+      const ok = input.clearTrees();
+      if (ok) sound.play("death");
+      return ok;
+    },
     // Read-only flags surfaced for the headless verify harness (reduced-motion + bloom state).
     sceneReducedMotion: scene.reducedMotion,
     get bloomEnabled() {

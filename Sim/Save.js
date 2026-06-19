@@ -199,6 +199,10 @@ export function deserialize(saved) {
   // Stats + history: restore if present, else initialize empty (old saves).
   if (saved.stats && saved.history) {
     world.stats = cloneJson(saved.stats);
+    // An old save predating the kills counter restores without it — backfill so the stats screen
+    // (and any kills read) sees a valid per-player array instead of undefined.
+    if (!world.stats.kills)
+      world.stats.kills = new Array(world.players.length).fill(0);
     world.history = cloneJson(saved.history);
   } else {
     initStats(world);
