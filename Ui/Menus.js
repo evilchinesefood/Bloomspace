@@ -211,7 +211,7 @@ export function showStartMenu(
   card.append(
     el("div", {
       style: "margin-top:.8rem;font:600 .72rem system-ui;opacity:.72;",
-      textContent: "build v29",
+      textContent: "build v30",
     }),
   );
 
@@ -327,7 +327,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
   // the sim defaults OFF when config.events is absent (existing worlds/tests unaffected).
   const eventsSwitch = el("wa-switch", {
     textContent: "Environmental events",
-    checked: true,
+    checked: false, // hazards (flares + meteors) OFF by default — opt-in
   });
 
   // Fog of war toggle. Default OFF — fog is a significant mode change (last-known visibility +
@@ -423,7 +423,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
       aiPersonality,
       specials: true, // terrain specials (rich rocks + nebulae) on for every started match
       startTree: true, // every spawn home starts with one mature seedling tree (produces from t=0)
-      events: eventsSwitch.checked !== false, // environmental hazards (flares + meteors)
+      events: eventsSwitch.checked === true, // environmental hazards (flares + meteors), opt-in
       fog: fogSwitch.checked === true, // fog of war (last-known visibility + blind AI), opt-in
       winConfig: { mode, timeLimitSecs },
     });
@@ -441,7 +441,7 @@ export function showSkirmishSetup(root, { onConfirm, onCancel }) {
     winSel.value = "elimination";
     timeSel.value = "0";
     layoutSel.value = "scatter";
-    eventsSwitch.checked = true;
+    eventsSwitch.checked = false;
     fogSwitch.checked = false;
     applySizeToSlider(); // clamp slider max to the (medium) default size
   };
