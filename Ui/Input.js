@@ -7,7 +7,7 @@
 // All select highlight + drag indicator visuals come from Render (already built).
 import { clearTrees as clearTreesSim } from "../Sim/Trees.js";
 import { isArmed } from "../Sim/Bombard.js";
-import { queueCommand, CMD } from "../Sim/Commands.js";
+import { queueCommand, CMD, STAGED } from "../Sim/Commands.js";
 import { buyTech } from "../Sim/Tech.js";
 import { buyUpgrade } from "../Sim/Upgrade.js";
 import { ownerColorHex } from "../Render/Palette.js";
@@ -204,7 +204,10 @@ export function createInput({
       fraction: frac,
       owner: HUMAN,
     });
-    if (sent > 0) views.fx.spawnSend(from.x, from.y, ownerColorHex(HUMAN));
+    // Skip the immediate send-burst FX when the command was staged (world paused).
+    // The Preview ghost is the feedback for staged orders.
+    if (sent !== STAGED && sent > 0)
+      views.fx.spawnSend(from.x, from.y, ownerColorHex(HUMAN));
   }
 
   function onUp(e) {

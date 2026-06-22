@@ -6,7 +6,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createWorld, OWNER_NEUTRAL, STATE } from "./World.js";
-import { applyCommand, queueCommand, drainCommands, CMD } from "./Commands.js";
+import {
+  applyCommand,
+  queueCommand,
+  drainCommands,
+  CMD,
+  STAGED,
+} from "./Commands.js";
 
 const PLAYERS = [
   { id: 0, isAi: false, difficulty: 0 },
@@ -224,4 +230,114 @@ test("drainCommands tolerates an absent pendingCommands field", () => {
   const w = mk();
   delete w.pendingCommands; // simulates a deserialized pre-seam save (serialization is a later step)
   assert.doesNotThrow(() => drainCommands(w));
+});
+
+// --- Staging (pause-and-plan) tests -----------------------------------------
+
+test("queueCommand STAGES a human command while world is paused (returns STAGED, no immediate mutation)", () => {
+  const w = mk();
+  w.paused = true;
+  const home = homeOf(w, 0);
+  const neutral = neutralColonizable(w);
+  const before = orbitersAt(w, home.id, 0);
+  const result = queueCommand(w, {
+    type: CMD.SEND,
+    from: home.id,
+    to: neutral.id,
+    fraction: 1,
+    owner: 0,
+  });
+  assert.equal(result, STAGED, "should return the STAGED sentinel");
+  assert.equal(
+    orbitersAt(w, home.id, 0),
+    before,
+    "no orbiters should leave while staged",
+  );
+  assert.equal(
+    w.pendingCommands.length,
+    1,
+    "command should be pushed onto pendingCommands",
+  );
+  assert.equal(w.pendingCommands[0].type, CMD.SEND);
+  assert.equal(w.pendingCommands[0].from, home.id);
+});
+
+test("queueCommand applies immediately (unpaused) — returns mutator result, no staging", () => {
+  const w = mk();
+  w.paused = false;
+  const home = homeOf(w, 0);
+  const neutral = neutralColonizable(w);
+  const before = orbitersAt(w, home.id, 0);
+  const sent = queueCommand(w, {
+    type: CMD.SEND,
+    from: home.id,
+    to: neutral.id,
+    fraction: 1,
+    owner: 0,
+  });
+  assert.ok(sent > 0, "should return the actual sent count (not STAGED)");
+  assert.notEqual(sent, STAGED);
+  assert.equal(
+    orbitersAt(w, home.id, 0),
+    before - sent,
+    "orbiters should leave immediately",
+  );
+  assert.deepEqual(w.pendingCommands, [], "pendingCommands should stay empty");
+});
+
+test("queueCommand applies an AI command immediately even while world is paused", () => {
+  const w = mk();
+  w.paused = true;
+  const r1 = homeOf(w, 1); // AI owner
+  const neutral = neutralColonizable(w);
+  const before = orbitersAt(w, r1.id, 1);
+  const sent = queueCommand(w, {
+    type: CMD.SEND,
+    from: r1.id,
+    to: neutral.id,
+    fraction: 1,
+    owner: 1,
+  });
+  assert.ok(sent > 0, "AI send should apply immediately (AI never stages)");
+  assert.notEqual(sent, STAGED);
+  assert.equal(orbitersAt(w, r1.id, 1), before - sent);
+  assert.deepEqual(
+    w.pendingCommands,
+    [],
+    "AI command must not touch pendingCommands",
+  );
+});
+
+test("staged command executes on resume: unpause + drainCommands applies the staged order", () => {
+  const w = mk();
+  w.paused = true;
+  const home = homeOf(w, 0);
+  const neutral = neutralColonizable(w);
+  const before = orbitersAt(w, home.id, 0);
+  // Stage a SEND while paused.
+  const r = queueCommand(w, {
+    type: CMD.SEND,
+    from: home.id,
+    to: neutral.id,
+    fraction: 1,
+    owner: 0,
+  });
+  assert.equal(r, STAGED);
+  assert.equal(
+    orbitersAt(w, home.id, 0),
+    before,
+    "still no departure while paused",
+  );
+  // Simulate resume: unpause then drain (mirrors what step() does).
+  w.paused = false;
+  drainCommands(w);
+  assert.ok(
+    orbitersAt(w, home.id, 0) < before,
+    "orbiters departed after drain",
+  );
+  assert.deepEqual(
+    w.pendingCommands,
+    [],
+    "pendingCommands cleared after drain",
+  );
 });

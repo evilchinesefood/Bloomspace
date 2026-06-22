@@ -9,6 +9,7 @@ import { createAsteroidView, sharedTextures } from "./Render/AsteroidView.js";
 import { createSeedlingView } from "./Render/SeedlingView.js";
 import { createTreeView } from "./Render/TreeView.js";
 import { createThreatView } from "./Render/ThreatView.js";
+import { createPreview } from "./Render/Preview.js";
 import { createFx } from "./Render/Fx.js";
 import { createPicking } from "./Render/Picking.js";
 import { createInput } from "./Ui/Input.js";
@@ -77,6 +78,8 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
   // seam below (App wires it to overlay.isThreatActive()); inactive = effectively zero cost.
   const threat = createThreatView(scene.scene, world);
   const picking = createPicking(scene.scene, scene.camera, canvas, world);
+  // Ghost overlay for staged (queued-while-paused) human orders. Never mutates world.
+  const preview = createPreview(scene.scene, world);
   // Non-authoritative audio: starts suspended, unlocks on first user gesture, consumes the
   // same event channel the FX drain reads. Owns no game truth. Defaults enabled; the real
   // saved sfx/music state is applied by App.applyQuality() right after construction.
@@ -222,6 +225,7 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
     threat.update(dt);
     fx.update(dt);
     picking.update();
+    preview.update(dt);
     // Skip the GL draw while the WebGL context is lost (else composer.render throws every
     // frame). The loop keeps running; rendering resumes when the context is restored.
     if (!scene.isContextLost || !scene.isContextLost()) scene.composer.render();
@@ -230,6 +234,7 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
   function destroy() {
     sound.destroy();
     input.destroy();
+    preview.dispose(); // ghost overlay — free EdgeLayer geometry/material
     threat.dispose(); // ThreatView owns its own flow/ring buffers — free them explicitly
 
     // Drop the resize listener the scene registered so matches don't stack handlers.

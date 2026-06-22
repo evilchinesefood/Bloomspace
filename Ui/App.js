@@ -211,6 +211,13 @@ export function createApp(root) {
     game = createGame(canvas, {}, world); // 3rd arg = restored world; skips world generation
     if (game.resize) game.resize(); // fit the restored world to the viewport
     beginPlaying();
+    // Sync App pause flag from the restored world so a game saved-while-paused resumes paused
+    // (with its staged orders intact and ghosted). beginPlaying() resets paused=false, so we
+    // re-apply after. world.paused is the serialized truth; App paused must mirror it.
+    if (world.paused) {
+      paused = true;
+      // world.paused is already true (from deserialization); no need to write it back.
+    }
   }
 
   // startTutorial — the guided tutorial game mode. Builds a match from the FIXED tutorial config
@@ -264,7 +271,8 @@ export function createApp(root) {
       },
       isPaused: () => paused,
       setPaused: (p) => {
-        paused = p;
+        paused = !!p;
+        if (game) game.world.paused = paused;
       },
       getSendFraction: () => (game ? game.getSendFraction() : 0.5),
       setSendFraction: (f) => game && game.setSendFraction(f),

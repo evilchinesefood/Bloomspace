@@ -1,14 +1,21 @@
 // Sim/Commands.js — deterministic intent seam between Input/AI and the sim mutators. NO three/DOM
-// (headless). queueCommand is the single call site Input + AI use to mutate the world; in normal
-// play it applies the command IMMEDIATELY and returns the mutator's result, so the refactor is
-// byte-for-byte behavior-preserving (the AI's per-tick orbit census + rng draw order are unchanged
-// because an earlier AI's send THIS tick is still applied before a later AI decides). The
-// pendingCommands list + drainCommands are DORMANT scaffolding here (the list is always empty, so
-// drain is a no-op); they activate only for human staged-while-paused orders in a later step.
+// (headless). queueCommand is the single call site Input + AI use to mutate the world; while the
+// world is PAUSED and the command owner is HUMAN (0), the command is STAGED onto pendingCommands
+// instead of applied immediately — queueCommand returns STAGED in that case. All other paths
+// (AI commands, unpaused human commands) apply immediately and return the mutator's result, keeping
+// the AI per-tick draw order byte-for-byte identical. drainCommands (called at the top of step())
+// applies the staged batch owner-ascending on the next step after resume.
 import { sendSeedlings, setRally } from "./Seedlings.js";
 import { tryConnect } from "./MapGen.js";
 import { fireBombard } from "./Bombard.js";
 import { plantTree } from "./Trees.js";
+
+// Sentinel returned by queueCommand when a human command is staged (world.paused). Callers
+// (Input.js) check for this to skip immediate execute-FX; the ghost preview is the feedback.
+export const STAGED = Symbol("staged");
+
+// Owner constant: human player is always owner 0.
+const HUMAN_OWNER = 0;
 
 // Intent-type discriminator. `c.type` is one of these; the PLANT intent carries the tree kind as
 // `c.treeType` so it never collides with this `type` tag.
@@ -39,10 +46,16 @@ export function applyCommand(world, c) {
   }
 }
 
-// queueCommand — the seam Input + AI call. In THIS step it applies the command immediately and
-// returns the mutator's result (NOT a deferring append). Staying immediate + returning the result
-// is what keeps the refactor byte-identical. Deferred staging-while-paused arrives in a later step.
+// queueCommand — the seam Input + AI call. While world.paused AND c.owner === HUMAN_OWNER (0),
+// the command is STAGED: a clone is pushed onto world.pendingCommands and STAGED is returned so
+// the caller (Input.js) knows to skip immediate execute-FX. In all other cases (AI commands,
+// unpaused human commands) the command is applied immediately and its mutator result is returned
+// — this path is byte-for-byte identical to before staging was added.
 export function queueCommand(world, c) {
+  if (world.paused && c.owner === HUMAN_OWNER) {
+    world.pendingCommands.push({ ...c });
+    return STAGED;
+  }
   return applyCommand(world, c);
 }
 
