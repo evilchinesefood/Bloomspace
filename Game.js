@@ -12,6 +12,7 @@ import { createFx } from "./Render/Fx.js";
 import { createPicking } from "./Render/Picking.js";
 import { createInput } from "./Ui/Input.js";
 import { createSound } from "./Ui/Sound.js";
+import { reducedMotion } from "./Render/Theme.js";
 
 // Free every GPU resource a match's scene graph holds. renderer.dispose()/forceContextLoss
 // reclaim the GL context, but the geometries, materials, instance buffers and (notably)
@@ -96,6 +97,11 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
   const FLOWER_EVERY = 0.9; // seconds between flower-puff sweeps
   const DEATH_PUFF_MAX = 4; // cap puffs per frame so big die-offs don't spam the pool
 
+  // Combo tracker: render-only, not serialized. Escalates capture juice for rapid p0 captures.
+  const COMBO_WINDOW = 2.5; // seconds before combo resets
+  let comboCount = 0;
+  let comboLastMs = 0;
+
   function emitFlowerPuffs() {
     for (const a of world.asteroids) {
       if (!a.trees || a.trees.length === 0) continue;
@@ -155,10 +161,24 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
         if (own === 0) sound.play("send");
       } else if (type === EVENT.CAPTURE) {
         if (own === 0) sound.play("capture");
+        if (!reducedMotion() && !fogHidden(ev.x[k], ev.y[k])) {
+          // Escalate burst for rapid player-0 captures (combo); other owners get base scale.
+          let scale = 1;
+          if (own === 0) {
+            if (now - comboLastMs <= COMBO_WINDOW * 1000) comboCount++;
+            else comboCount = 1;
+            comboLastMs = now;
+            scale = Math.min(comboCount, 3);
+            if (scale > 1) sound.play("capture", { rate: 0.9 + scale * 0.1 });
+          }
+          fx.spawnCapture(ev.x[k], ev.y[k], ownerColorHex(ev.owner[k]), scale);
+        }
       } else if (type === EVENT.WIN) sound.play("win");
       else if (type === EVENT.LOSE) sound.play("lose");
       else if (type === EVENT.FIRE) {
         if (own === 0) sound.play("fire"); // bombardment battery fire-start
+        if (!reducedMotion() && !fogHidden(ev.x[k], ev.y[k]))
+          fx.spawnShock(ev.x[k], ev.y[k]);
       } else if (type === EVENT.LOST)
         sound.play("alert"); // always; owner is 0 — guarded at emit site in Combat.flipOwnership
       else if (type === EVENT.DESTROY)
@@ -177,7 +197,7 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
     flowerTimer += dt;
     if (flowerTimer >= FLOWER_EVERY) {
       flowerTimer = 0;
-      emitFlowerPuffs();
+      if (!reducedMotion()) emitFlowerPuffs();
     }
 
     scene.driftStars(dt);

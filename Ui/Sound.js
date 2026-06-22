@@ -105,7 +105,8 @@ export function createSound() {
 
   // Fire a one-shot SFX. Skips silently when SFX is off, the context isn't unlocked, the
   // buffer hasn't decoded yet, or the per-frame / min-interval throttle trips.
-  function play(name) {
+  // Optional { rate } sets playbackRate (e.g. combo pitch escalation).
+  function play(name, opts) {
     if (!sfxEnabled || !ctx || ctx.state !== "running") return;
     const buf = buffers[name];
     if (!buf) return;
@@ -117,6 +118,7 @@ export function createSound() {
     try {
       const src = ctx.createBufferSource();
       src.buffer = buf;
+      if (opts && opts.rate != null) src.playbackRate.value = opts.rate;
       src.connect(sfxGain);
       src.start();
     } catch {

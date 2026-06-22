@@ -132,6 +132,44 @@ export function createFx(scene, world) {
     }
   }
 
+  // Capture burst: bright outward ring + sparkle scatter in the new owner's color.
+  // `scale` (1–3) escalates the burst with combo count.
+  function spawnCapture(x, y, hex = 0x46e8ff, scale = 1) {
+    const { count: COUNT_K, speed: SPEED_K, life: LIFE_K } = motionScalars();
+    // Uniform ring — reads as "this rock flipped"
+    const ring = Math.max(6, Math.round(24 * COUNT_K * Math.min(scale, 3)));
+    for (let k = 0; k < ring; k++) {
+      const a = (k / ring) * TAU;
+      const sp = (110 + Math.random() * 60) * SPEED_K * (0.9 + scale * 0.1);
+      emit(x, y, Math.cos(a), Math.sin(a), sp, 0.75 * LIFE_K, hex);
+    }
+    // Sparkle scatter — random bright flecks over the ring
+    const sparks = Math.max(4, Math.round(14 * COUNT_K * Math.min(scale, 3)));
+    for (let k = 0; k < sparks; k++) {
+      const a = Math.random() * TAU;
+      const sp = (60 + Math.random() * 100) * SPEED_K;
+      emit(x, y, Math.cos(a), Math.sin(a), sp, 0.55 * LIFE_K, 0xffffff);
+    }
+  }
+
+  // Bombardment shockwave: fast wide ring, reads as a concussive blast.
+  function spawnShock(x, y, hex = 0xff8833) {
+    const { count: COUNT_K, speed: SPEED_K, life: LIFE_K } = motionScalars();
+    const ring = Math.max(10, Math.round(32 * COUNT_K));
+    for (let k = 0; k < ring; k++) {
+      const a = (k / ring) * TAU;
+      const sp = (200 + Math.random() * 120) * SPEED_K;
+      emit(x, y, Math.cos(a), Math.sin(a), sp, 0.7 * LIFE_K, hex);
+    }
+    // Hot white core flash
+    const flash = Math.max(6, Math.round(16 * COUNT_K));
+    for (let k = 0; k < flash; k++) {
+      const a = Math.random() * TAU;
+      const sp = (100 + Math.random() * 80) * SPEED_K;
+      emit(x, y, Math.cos(a), Math.sin(a), sp, 0.4 * LIFE_K, 0xffffff);
+    }
+  }
+
   // Age + recycle. Dead particles drop to black so they stop contributing to bloom.
   function update(dt) {
     for (let i = 0; i < POOL; i++) {
@@ -161,6 +199,8 @@ export function createFx(scene, world) {
     spawnExplosion,
     spawnFlare,
     spawnMeteor,
+    spawnCapture,
+    spawnShock,
     update,
   };
 }
