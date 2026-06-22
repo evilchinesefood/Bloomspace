@@ -53,6 +53,7 @@ const SHELL = [
   "Render/Scene.js",
   "Render/SeedlingView.js",
   "Render/AsteroidView.js",
+  "Render/EdgeLayer.js",
   "Render/TreeView.js",
   "Render/Fx.js",
   "Render/Picking.js",

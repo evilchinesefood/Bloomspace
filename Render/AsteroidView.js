@@ -4,6 +4,7 @@
 // every frame. A bright owner rim shows ownership; plus the neighbor network, LOD glow,
 // selection ring, and rally route. `id === index`.
 import * as THREE from "three";
+import { createEdgeLayer } from "./EdgeLayer.js";
 import { ownerColor, ownerColorHex } from "./Palette.js";
 import { lodActive } from "./SeedlingView.js";
 import { CHARGE_TICKS } from "../Sim/Bombard.js";
@@ -671,54 +672,15 @@ export function createAsteroidView(scene, world, camCtl, fx) {
   net.frustumCulled = false;
   scene.add(net);
 
-  // --- Manual player-built connections (world.links): a brighter, distinct line layer that
-  //     rebuilds when links are added (their endpoints may be moving bodies). ---
-  const linkGeo = new THREE.BufferGeometry();
-  let linkPos = new Float32Array(0);
-  let linkCount = -1;
-  const linkNet = new THREE.LineSegments(
-    linkGeo,
-    new THREE.LineBasicMaterial({
-      color: 0x66ffc8,
-      transparent: true,
-      opacity: 0.6,
-    }),
-  );
-  linkNet.frustumCulled = false;
-  scene.add(linkNet);
-  function writeLinks() {
-    const links = world.links || [];
-    const countChanged = links.length !== linkCount;
-    if (countChanged) {
-      linkCount = links.length;
-      linkPos = new Float32Array(links.length * 6);
-      linkGeo.setAttribute("position", new THREE.BufferAttribute(linkPos, 3));
-      linkGeo.setDrawRange(0, links.length * 2);
-    }
-    // Only rewrite + re-upload when the link set changed or an endpoint is a moving (orbiting)
-    // body — a static link set needs no per-frame rewrite (mirrors the writeNet hasMoving gate).
-    let endpointMoving = false;
-    if (hasMoving)
-      for (let e = 0; e < links.length; e++)
-        if (movingFlag[links[e][0]] || movingFlag[links[e][1]]) {
-          endpointMoving = true;
-          break;
-        }
-    if (!countChanged && !endpointMoving) return;
-    for (let e = 0; e < links.length; e++) {
-      const a = rocks[links[e][0]];
-      const b = rocks[links[e][1]];
-      const o = e * 6;
-      linkPos[o] = a.x;
-      linkPos[o + 1] = a.y;
-      linkPos[o + 2] = -2.1;
-      linkPos[o + 3] = b.x;
-      linkPos[o + 4] = b.y;
-      linkPos[o + 5] = -2.1;
-    }
-    if (links.length) linkGeo.attributes.position.needsUpdate = true;
-  }
-  writeLinks();
+  // --- Manual player-built connections (world.links): a brighter, distinct line layer. ---
+  const linkLayer = createEdgeLayer(scene, {
+    color: 0x66ffc8,
+    opacity: 0.6,
+    z: -2.1,
+    getList: () => world.links || [],
+    getPoint: (id) => rocks[id],
+  });
+  linkLayer.update(false, () => false);
 
   // --- LOD aggregate glow ---
   const glow = new THREE.InstancedMesh(
@@ -993,7 +955,7 @@ export function createAsteroidView(scene, world, camCtl, fx) {
       rims.instanceMatrix.needsUpdate = true;
       writeNetMoving();
     }
-    writeLinks();
+    linkLayer.update(hasMoving, (id) => movingFlag[id]);
 
     // selection ring tracks the (possibly moving) selected rock
     const sel = selectedId >= 0 ? rocks[selectedId] : null;
