@@ -2,24 +2,13 @@
 // particles recycle, so there is no per-spawn allocation in steady state. spawnSend is
 // the working burst; spawnDeath/spawnFlower reuse the same pool with their own tuning.
 import * as THREE from "three";
+import { motionScalars } from "./Theme.js";
 
 const POOL = 1024; // max simultaneous particles
 const TAU = Math.PI * 2;
 
-// prefers-reduced-motion: damp the particle bursts (fewer particles, slower, shorter-lived)
-// so the decorative FX don't fling motion across the screen for motion-sensitive players.
-const prefersReducedMotion = () =>
-  typeof window !== "undefined" &&
-  typeof window.matchMedia === "function" &&
-  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
 // `world` is unused today; kept for create*(scene, world) symmetry with the other views.
 export function createFx(scene, world) {
-  const reduced = prefersReducedMotion();
-  // Scale factors applied to every burst when reduced-motion is on.
-  const COUNT_K = reduced ? 0.4 : 1; // fewer particles
-  const SPEED_K = reduced ? 0.5 : 1; // slower spread
-  const LIFE_K = reduced ? 0.6 : 1; // shorter-lived
   const pos = new Float32Array(POOL * 3);
   const colArr = new Float32Array(POOL * 3); // displayed color (faded)
   const baseCol = new Float32Array(POOL * 3); // full-brightness source color
@@ -69,6 +58,7 @@ export function createFx(scene, world) {
 
   // Outward ring burst when seedlings are dispatched.
   function spawnSend(x, y, hex = 0x46e8ff) {
+    const { count: COUNT_K, speed: SPEED_K, life: LIFE_K } = motionScalars();
     const count = Math.max(4, Math.round(18 * COUNT_K));
     for (let k = 0; k < count; k++) {
       const a = (k / count) * TAU;
@@ -79,6 +69,7 @@ export function createFx(scene, world) {
 
   // Fast scatter on death.
   function spawnDeath(x, y, hex = 0xff5a5a) {
+    const { count: COUNT_K, speed: SPEED_K, life: LIFE_K } = motionScalars();
     const count = Math.max(4, Math.round(10 * COUNT_K));
     for (let k = 0; k < count; k++) {
       const a = Math.random() * TAU;
@@ -89,6 +80,7 @@ export function createFx(scene, world) {
 
   // Gentle upward-ish bloom when a tree flowers.
   function spawnFlower(x, y, hex = 0xffe27a) {
+    const { count: COUNT_K, speed: SPEED_K, life: LIFE_K } = motionScalars();
     const count = Math.max(4, Math.round(14 * COUNT_K));
     for (let k = 0; k < count; k++) {
       const a = Math.random() * TAU;
@@ -101,6 +93,7 @@ export function createFx(scene, world) {
   // longer-lived than spawnDeath, in two waves (a hot white flash + a colored shell) so the
   // kill reads as a superweapon hit. Still bounded by the shared POOL ring.
   function spawnExplosion(x, y, hex = 0xffb04a) {
+    const { count: COUNT_K, speed: SPEED_K, life: LIFE_K } = motionScalars();
     const flash = Math.max(8, Math.round(28 * COUNT_K));
     for (let k = 0; k < flash; k++) {
       const a = (k / flash) * TAU;
@@ -118,6 +111,7 @@ export function createFx(scene, world) {
   // Solar flare: a wide outward ring of particles flung from the star, fast and longer-lived so
   // it reads as an expanding shockwave (the sim damages a growing ring band over ~1.6s).
   function spawnFlare(x, y, hex = 0xffd24a) {
+    const { count: COUNT_K, speed: SPEED_K, life: LIFE_K } = motionScalars();
     const count = Math.max(10, Math.round(40 * COUNT_K));
     for (let k = 0; k < count; k++) {
       const a = (k / count) * TAU;
@@ -129,6 +123,7 @@ export function createFx(scene, world) {
   // Meteor impact: a compact, hot directional-ish burst at the strike point (reuses the
   // explosion shell tuning, smaller, so a shower of impacts doesn't drown the field).
   function spawnMeteor(x, y, hex = 0xff7a3a) {
+    const { count: COUNT_K, speed: SPEED_K, life: LIFE_K } = motionScalars();
     const count = Math.max(8, Math.round(22 * COUNT_K));
     for (let k = 0; k < count; k++) {
       const a = Math.random() * TAU;
