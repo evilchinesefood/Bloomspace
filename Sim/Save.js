@@ -24,8 +24,12 @@ import {
   initStats,
 } from "./World.js";
 import { rebuildNav } from "./MapGen.js";
+import { CMD } from "./Commands.js";
 
-export const SAVE_VERSION = 1;
+// All valid CMD type strings — used for validate-on-restore of pendingCommands.
+const CMD_TYPES = new Set(Object.values(CMD));
+
+export const SAVE_VERSION = 2;
 
 // Players are plain objects (id/isAi/difficulty/seeds/tech + a set of _-prefixed deterministic
 // cadence counters accumulated across F-base/F3/F4/F6a). We clone the WHOLE object — same as
@@ -99,6 +103,11 @@ export function serialize(world) {
     // initialized empty on restore (initStats).
     stats: world.stats ? cloneJson(world.stats) : null,
     history: world.history ? cloneJson(world.history) : null,
+    // Pause flag (step 10 toggles; here just serialized). Absent in v1 saves → false on restore.
+    paused: !!world.paused,
+    // Staged command queue — plain intent objects (type/owner/from/to/fraction/rock/treeType).
+    // Empty in normal play; human staged-while-paused orders populate it (step 10).
+    pendingCommands: cloneJson(world.pendingCommands ?? []),
   };
 }
 
@@ -207,6 +216,34 @@ export function deserialize(saved) {
   } else {
     initStats(world);
   }
+
+  // Pause flag — absent in v1/old saves restores as false (no behavioral change).
+  world.paused = !!saved.paused;
+
+  // pendingCommands — validate-on-restore: keep only plain-object entries with a known CMD type,
+  // an owner in [0, players.length), and any referenced body id (from/to/rock) an integer in
+  // [0, asteroids.length). Drop malformed entries; never throw. Default to [].
+  const nAst = world.asteroids.length;
+  const nPly = world.players.length;
+  const isBodyId = (v) =>
+    v === undefined || (Number.isInteger(v) && v >= 0 && v < nAst);
+  const rawCmds = Array.isArray(saved.pendingCommands)
+    ? saved.pendingCommands
+    : [];
+  world.pendingCommands = cloneJson(
+    rawCmds.filter(
+      (c) =>
+        c !== null &&
+        typeof c === "object" &&
+        CMD_TYPES.has(c.type) &&
+        Number.isInteger(c.owner) &&
+        c.owner >= 0 &&
+        c.owner < nPly &&
+        isBodyId(c.from) &&
+        isBodyId(c.to) &&
+        isBodyId(c.rock),
+    ),
+  );
 
   // world.nav is DERIVED from each body's restored .neighbors (the post-belt graph) — recompute
   // it so routing resumes identically without serializing the table.

@@ -248,6 +248,9 @@ export function createWorld(config = {}) {
   // of step(). World-level + JSON-serializable (step 9 serializes it); drainCommands tolerates an
   // older deserialized world that lacks the field.
   world.pendingCommands = [];
+  // Pause flag — step 10 toggles this; here we just introduce + serialize it. When true, step()
+  // will be gated by the UI layer (step 10); the sim core itself is unaware of the flag.
+  world.paused = false;
   // Procedurally place asteroids + seed each player's home orbit (deterministic).
   generateMap(world, config, spawnSeedling);
   // Assign personality to each AI player AFTER map generation. No world.rng() is consumed here

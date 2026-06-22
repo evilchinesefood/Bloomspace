@@ -395,3 +395,81 @@ test("deserialize returns null for a structurally-invalid save (non-array astero
   assert.equal(deserialize({ ...good, players: undefined }), null);
   assert.equal(deserialize({ ...good, players: 42 }), null);
 });
+
+// --- 8. SAVE_VERSION 2: paused + pendingCommands round-trip -----------------
+
+test("SAVE_VERSION is 2", () => {
+  assert.equal(SAVE_VERSION, 2);
+});
+
+test("v1-stamped save is rejected by deserialize → null", () => {
+  const w = makeWorld();
+  const saved = serialize(w);
+  assert.equal(saved.version, 2, "current save is v2");
+  assert.equal(
+    deserialize({ ...saved, version: 1 }),
+    null,
+    "v1 save returns null",
+  );
+});
+
+test("paused+pendingCommands survive serialize→JSON-roundtrip→deserialize (deep-equal)", () => {
+  const w = makeWorld(7);
+  // Any two valid asteroid ids (0 and 1 always exist after generateMap with asteroidCount=14).
+  assert.ok(w.asteroids.length >= 2, "need at least 2 asteroids");
+  const from = 0;
+  const to = 1;
+
+  w.paused = true;
+  w.pendingCommands = [
+    { type: "send", owner: 0, from, to, fraction: 0.5 },
+    { type: "plant", owner: 0, rock: from, treeType: "economy" },
+  ];
+
+  const saved = serialize(w);
+  // Full JSON string round-trip (mirrors localStorage).
+  const through = JSON.parse(JSON.stringify(saved));
+  const w2 = deserialize(through);
+
+  assert.ok(w2, "deserialize produced a world");
+  assert.equal(w2.paused, true, "paused restored");
+  assert.deepEqual(
+    w2.pendingCommands,
+    w.pendingCommands,
+    "pendingCommands deep-equal after round-trip",
+  );
+});
+
+test("validate-on-restore drops malformed pendingCommands, keeps valid, never throws", () => {
+  const w = makeWorld(7);
+  assert.ok(w.asteroids.length >= 1, "need at least one asteroid");
+  const rock = 0; // asteroid index 0 always exists
+  const nAst = w.asteroids.length;
+  const nPly = w.players.length;
+
+  const saved = serialize(w);
+  // Inject a mix of valid + malformed entries into the saved blob.
+  const validEntry = { type: "plant", owner: 0, rock, treeType: "economy" };
+  saved.pendingCommands = [
+    validEntry,
+    { type: "INVALID_TYPE", owner: 0, rock }, // bad type
+    { type: "send", owner: nPly, from: rock, to: rock }, // owner out of range
+    { type: "send", owner: 0, from: nAst, to: rock }, // from out of range
+    { type: "fire", owner: 0, from: rock, to: nAst }, // to out of range
+    null, // null entry
+    42, // primitive
+    { type: "plant", owner: -1, rock }, // negative owner
+  ];
+
+  let w2;
+  assert.doesNotThrow(() => {
+    w2 = deserialize(saved);
+  }, "deserialize never throws");
+  assert.ok(w2, "deserialize produced a world");
+  assert.equal(w2.pendingCommands.length, 1, "only 1 valid entry kept");
+  assert.deepEqual(
+    w2.pendingCommands[0],
+    validEntry,
+    "valid entry preserved intact",
+  );
+});
