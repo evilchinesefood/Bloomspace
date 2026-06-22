@@ -61,7 +61,7 @@ export function createEdgeLayer(scene, opts = {}) {
     }
     if (links.length) geo.attributes.position.needsUpdate = true;
     // LineDashedMaterial needs per-vertex line distances; recompute after each rebuild only.
-    if (dashed && links.length) geo.computeLineDistances();
+    if (dashed && links.length) obj.computeLineDistances();
   }
 
   // Advance the dash offset to read as directional flow. Caller gates on reducedMotion()

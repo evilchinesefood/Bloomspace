@@ -118,7 +118,7 @@ export function createThreatView(scene, world) {
     if (lines) {
       flowGeo.attributes.position.needsUpdate = true;
       flowGeo.attributes.color.needsUpdate = true;
-      flowGeo.computeLineDistances(); // required for LineDashedMaterial
+      flow.computeLineDistances(); // required for LineDashedMaterial
     }
 
     // --- Contest rings (skip bodies with no inbound fleet) ---
