@@ -334,6 +334,12 @@ function flipOwnership(world) {
       if (prev === 0 && rival !== 0)
         pushEvent(world, EVENT.LOST, rock.x, rock.y, 0);
       rock.rally = -1; // a captured rock drops the old owner's rally anchor
+      // Sever any energy conduit touching the just-flipped rock (either endpoint) — the old owner
+      // no longer controls both ends. Mirrors Bombard's link-filter. Empty conduits → no-op.
+      if (world.conduits && world.conduits.length)
+        world.conduits = world.conduits.filter(
+          (c) => c.from !== rock.id && c.to !== rock.id,
+        );
     }
   }
 }

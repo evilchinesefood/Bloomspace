@@ -7,6 +7,15 @@ import { RICH_ENERGY_MULT } from "./MapGen.js";
 
 export const ENERGY_RATE = 4; // energy/sec at energyStat 100
 export const ENERGY_MAX = 200; // per-asteroid storage cap
+export const CONDUIT_RATE = 12; // energy/sec a conduit pumps from→to (capped per tick)
+
+// rockCap — the per-rock energy storage cap, matching updateEconomy's `ENERGY_MAX * mult` (a rich
+// rock + a planet's energyMult both raise the ceiling). Shared so a conduit never overfills a rock
+// past what regen itself could store.
+function rockCap(rock) {
+  const rich = rock.special === "rich" ? RICH_ENERGY_MULT : 1;
+  return ENERGY_MAX * (rock.energyMult || 1) * rich;
+}
 
 // updateEconomy — regenerate stored energy on every owned asteroid, capped at ENERGY_MAX.
 export function updateEconomy(world, dt) {
@@ -26,10 +35,37 @@ export function updateEconomy(world, dt) {
     let e =
       rock.energy +
       ENERGY_RATE * (rock.energyStat / 100) * mult * tech * aura * dt;
-    const cap = ENERGY_MAX * mult;
+    const cap = rockCap(rock);
     if (e > cap) e = cap;
     if (e < 0) e = 0;
     rock.energy = e;
+  }
+}
+
+// updateConduits — move energy along each player-built conduit AFTER regen. RNG-FREE, iterates in
+// index order. A conduit {from,to,owner} pumps min(CONDUIT_RATE*dt, from.energy, to-headroom) from
+// `from` to `to` only when BOTH endpoints still exist, are non-dead, and are STILL owned by
+// conduit.owner (an endpoint that flipped owner is inert this tick; Combat.flipOwnership also
+// severs it). Default-empty → no-op → byte-identical. The transfer is conservative (no energy is
+// created/destroyed) and never drives `from` below 0 or `to` above its cap.
+export function updateConduits(world, dt) {
+  const conduits = world.conduits;
+  if (!conduits || conduits.length === 0) return;
+  const asts = world.asteroids;
+  for (let c = 0; c < conduits.length; c++) {
+    const cd = conduits[c];
+    const from = asts[cd.from];
+    const to = asts[cd.to];
+    if (!from || !to || from.dead || to.dead) continue;
+    if (from.owner !== cd.owner || to.owner !== cd.owner) continue;
+    const headroom = rockCap(to) - to.energy;
+    if (headroom <= 0) continue;
+    let move = CONDUIT_RATE * dt;
+    if (move > from.energy) move = from.energy;
+    if (move > headroom) move = headroom;
+    if (move <= 0) continue;
+    from.energy -= move;
+    to.energy += move;
   }
 }
 
@@ -42,4 +78,11 @@ export function spendEnergy(asteroid, amount) {
   return true;
 }
 
-export default { updateEconomy, spendEnergy, ENERGY_RATE, ENERGY_MAX };
+export default {
+  updateEconomy,
+  updateConduits,
+  spendEnergy,
+  ENERGY_RATE,
+  ENERGY_MAX,
+  CONDUIT_RATE,
+};

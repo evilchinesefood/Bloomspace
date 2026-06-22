@@ -6,7 +6,7 @@
 // the AI per-tick draw order byte-for-byte identical. drainCommands (called at the top of step())
 // applies the staged batch owner-ascending on the next step after resume.
 import { sendSeedlings, raidSeedlings, setRally } from "./Seedlings.js";
-import { tryConnect } from "./MapGen.js";
+import { tryConnect, tryConduit } from "./MapGen.js";
 import { fireBombard } from "./Bombard.js";
 import { plantTree } from "./Trees.js";
 
@@ -24,6 +24,7 @@ export const CMD = {
   RAID: "raid",
   RALLY: "rally",
   CONNECT: "connect",
+  CONDUIT: "conduit",
   FIRE: "fire",
   PLANT: "plant",
   RETREAT: "retreat",
@@ -52,6 +53,8 @@ export function applyCommand(world, c) {
       return setRally(world, c.from, c.to, c.owner);
     case CMD.CONNECT:
       return tryConnect(world, c.from, c.to, c.owner);
+    case CMD.CONDUIT:
+      return tryConduit(world, c.from, c.to, c.owner);
     case CMD.FIRE:
       return fireBombard(world, c.from, c.to, c.owner);
     case CMD.PLANT:

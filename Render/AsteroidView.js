@@ -682,6 +682,22 @@ export function createAsteroidView(scene, world, camCtl, fx) {
   });
   linkLayer.update(false, () => false);
 
+  // --- Energy conduits (world.conduits): a dashed amber "flow" line per directed pipe. EdgeLayer's
+  //     dashed mode scrolls its dash offset (animate) to read as from→to flow; gated on reducedMotion
+  //     (the scene-derived flag) so it stays static when motion is reduced. Empty list → nothing
+  //     renders. Disposed with the scene graph (Game.disposeSceneGraph traverses + frees it). ---
+  const conduitLayer = createEdgeLayer(scene, {
+    color: 0xffc24b,
+    opacity: 0.75,
+    z: -2.05,
+    dashed: true,
+    dashSize: 16,
+    gapSize: 10,
+    getList: () => (world.conduits || []).map((c) => [c.from, c.to]),
+    getPoint: (id) => rocks[id],
+  });
+  conduitLayer.update(false, () => false);
+
   // --- LOD aggregate glow ---
   const glow = new THREE.InstancedMesh(
     new THREE.CircleGeometry(1, 20),
@@ -956,6 +972,10 @@ export function createAsteroidView(scene, world, camCtl, fx) {
       writeNetMoving();
     }
     linkLayer.update(hasMoving, (id) => movingFlag[id]);
+    // Conduits rebuild on count/endpoint change like links; scroll the dash flow only when motion
+    // isn't reduced (a no-op in solid mode, but conduits are dashed).
+    conduitLayer.update(hasMoving, (id) => movingFlag[id]);
+    if (!reducedMotion) conduitLayer.animate(dt);
 
     // selection ring tracks the (possibly moving) selected rock
     const sel = selectedId >= 0 ? rocks[selectedId] : null;

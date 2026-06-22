@@ -624,6 +624,24 @@ export function tryConnect(world, fromId, toId, owner) {
   return true;
 }
 
+// tryConduit — player-built DIRECTED energy pipe between two bodies they BOTH control. Validates
+// both ends exist + are non-dead + distinct + owned by `owner`, and that the SAME (from,to)
+// directed pair isn't already a conduit. On success pushes {from,to,owner} onto world.conduits and
+// returns true; else false. Unlike tryConnect this neither costs energy nor touches the nav graph
+// (conduits move energy, not ships). Mirrors tryConnect's ownership/duplicate discipline.
+export function tryConduit(world, fromId, toId, owner) {
+  const A = world.asteroids[fromId];
+  const B = world.asteroids[toId];
+  if (!A || !B || fromId === toId) return false;
+  if (A.dead || B.dead) return false;
+  if (A.owner !== owner || B.owner !== owner) return false; // must control both ends
+  if (!world.conduits) world.conduits = [];
+  for (const c of world.conduits)
+    if (c.from === fromId && c.to === toId) return false; // already piped this direction
+  world.conduits.push({ from: fromId, to: toId, owner });
+  return true;
+}
+
 // tagSpecials — run at the END of generation (after homes + seedlings) so it only ADDS tags +
 // nebula regions, never shifting the base layout. Draws rng only here ⇒ a specials-ON world and
 // a specials-OFF world for the same seed share identical positions/stats/homes/seedlings.

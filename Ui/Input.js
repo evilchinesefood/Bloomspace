@@ -30,6 +30,7 @@ export function createInput({
   let pointerId = null;
   let rallyMode = false; // armed: next click sets the selected rock's rally point
   let connectMode = false; // armed: next click links the selected rock to another owned body
+  let conduitMode = false; // armed: next click pipes energy from the selected rock to another owned body
   let fireMode = false; // armed: next click on ANY body fires the selected battery at it
   let retreatMode = false; // armed: next click on an owned rock sets the selected rock's fallback
   const activeTouches = new Set(); // live touch pointers — 2+ means a camera gesture, not select
@@ -39,28 +40,35 @@ export function createInput({
   }
   function setRallyMode(on) {
     rallyMode = !!on;
-    if (rallyMode) connectMode = fireMode = retreatMode = false; // arm-modes are mutually exclusive
+    if (rallyMode) connectMode = conduitMode = fireMode = retreatMode = false; // arm-modes are mutually exclusive
   }
   function isRallyMode() {
     return rallyMode;
   }
   function setConnectMode(on) {
     connectMode = !!on;
-    if (connectMode) rallyMode = fireMode = retreatMode = false;
+    if (connectMode) rallyMode = conduitMode = fireMode = retreatMode = false;
   }
   function isConnectMode() {
     return connectMode;
   }
+  function setConduitMode(on) {
+    conduitMode = !!on;
+    if (conduitMode) rallyMode = connectMode = fireMode = retreatMode = false;
+  }
+  function isConduitMode() {
+    return conduitMode;
+  }
   function setFireMode(on) {
     fireMode = !!on;
-    if (fireMode) rallyMode = connectMode = retreatMode = false;
+    if (fireMode) rallyMode = connectMode = conduitMode = retreatMode = false;
   }
   function isFireMode() {
     return fireMode;
   }
   function setRetreatMode(on) {
     retreatMode = !!on;
-    if (retreatMode) rallyMode = connectMode = fireMode = false;
+    if (retreatMode) rallyMode = connectMode = conduitMode = fireMode = false;
   }
   function isRetreatMode() {
     return retreatMode;
@@ -139,6 +147,30 @@ export function createInput({
           owner: HUMAN,
         });
       connectMode = false;
+      return;
+    }
+
+    // Conduit mode: click a SECOND body you control to build a DIRECTED energy pipe (selected →
+    // clicked). Like connect, an empty-space miss keeps it armed; clicking the source cancels.
+    if (conduitMode) {
+      const src = selectedId();
+      if (
+        src < 0 ||
+        !world.asteroids[src] ||
+        world.asteroids[src].owner !== HUMAN
+      ) {
+        conduitMode = false;
+        return;
+      }
+      if (clicked < 0) return; // missed — keep armed
+      if (clicked !== src)
+        queueCommand(world, {
+          type: CMD.CONDUIT,
+          from: src,
+          to: clicked,
+          owner: HUMAN,
+        });
+      conduitMode = false;
       return;
     }
 
@@ -344,6 +376,7 @@ export function createInput({
     if (e.key === "Escape") {
       rallyMode = false;
       connectMode = false;
+      conduitMode = false;
       fireMode = false;
       retreatMode = false;
     }
@@ -375,6 +408,8 @@ export function createInput({
     isRallyMode,
     setConnectMode,
     isConnectMode,
+    setConduitMode,
+    isConduitMode,
     setFireMode,
     isFireMode,
     setRetreatMode,

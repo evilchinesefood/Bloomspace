@@ -4,7 +4,7 @@ import { generateMap } from "./MapGen.js";
 import { updateOrbits } from "./Moons.js";
 import { updateSeedlings, updateRally } from "./Seedlings.js";
 import { resolveCombat, updateRetreat } from "./Combat.js";
-import { updateEconomy } from "./Economy.js";
+import { updateEconomy, updateConduits } from "./Economy.js";
 import { updateTrees, updateAura } from "./Trees.js";
 import { updateAi, checkVictory, PERSONALITY_NAMES } from "./Ai.js";
 import { updateBombard } from "./Bombard.js";
@@ -252,6 +252,10 @@ export function createWorld(config = {}) {
   // Pause flag — step 10 toggles this; here we just introduce + serialize it. When true, step()
   // will be gated by the UI layer (step 10); the sim core itself is unaware of the flag.
   world.paused = false;
+  // Energy conduits — player-built directed pipes {from,to,owner} that move capped energy from→to
+  // each tick (Economy.updateConduits). World-level + JSON-serializable (Save rides v2 + `?? []`).
+  // Empty in normal play → updateConduits + the sever-on-flip filter are no-ops → byte-identical.
+  world.conduits = [];
   // Procedurally place asteroids + seed each player's home orbit (deterministic).
   generateMap(world, config, spawnSeedling);
   // Assign personality to each AI player AFTER map generation. No world.rng() is consumed here
@@ -390,6 +394,9 @@ export function step(world, dt) {
   // defaults off → no-op → byte-identical to a pre-retreat world.
   updateRetreat(world);
   updateEconomy(world, dt);
+  // Energy conduits move capped energy along player-built pipes AFTER regen (so this tick's regen
+  // is available to ship). Default-empty → no-op → byte-identical to a pre-conduit world.
+  updateConduits(world, dt);
   updateTrees(world, dt);
   updateBombard(world, dt); // advance battery charges / destroy bodies, before victory check
   if (world.hazardsOn) stepHazards(world, dt); // env hazards damage fleets before victory check

@@ -537,6 +537,19 @@ export function createHud(root, api) {
   });
   root.append(connectBanner);
 
+  // Conduit arming banner — amber, matching the conduit flow line.
+  const conduitBanner = el("div", {
+    style:
+      "position:absolute;top:70px;left:50%;transform:translateX(-50%);pointer-events:none;" +
+      "display:none;align-items:center;gap:.5rem;padding:.5rem .9rem;border-radius:999px;" +
+      "background:rgba(255,194,75,.16);border:1px solid rgba(255,194,75,.6);color:#ffe0a3;" +
+      "font:700 .85rem system-ui;white-space:nowrap;box-shadow:0 2px 18px rgba(255,194,75,.25);",
+    html:
+      '<i class="fa-solid fa-bolt"></i>' +
+      "Click another body you control to pipe energy to it — Esc to cancel",
+  });
+  root.append(conduitBanner);
+
   // FIRE arming banner — an alarming red top-center cue while the player picks a bombard target.
   const fireBanner = el("div", {
     style:
@@ -816,6 +829,21 @@ export function createHud(root, api) {
   );
   connectBtn._tip = tip(connectBtn, "");
 
+  // Energy conduit: build a directed pipe that moves stored energy from this rock to another body
+  // you control each tick. Arms a one-click pick like the connection.
+  const conduitBtn = el("wa-button", {
+    size: "small",
+    style: "width:100%;margin-bottom:.4rem;",
+    html: '<i slot="start" class="fa-solid fa-bolt"></i>Build Conduit',
+  });
+  conduitBtn.addEventListener("click", () =>
+    api.setConduitMode(!api.isConduitMode()),
+  );
+  conduitBtn._tip = tip(
+    conduitBtn,
+    "Build an energy conduit to another body you control: click, then pick the target. Pipes stored energy from this rock to it each tick.",
+  );
+
   // Inbound-rally view (toggle, also bound to the 'i' key): shows which OTHER bodies have
   // their rally set TO the selected body, instead of this body's own outbound rally.
   const inboundBtn = el("wa-button", {
@@ -857,6 +885,7 @@ export function createHud(root, api) {
     rallyBtn,
     retreatBtn,
     connectBtn,
+    conduitBtn,
     inboundBtn,
     hint,
     // Styled hover tooltips (anchored by id via `for`) — DOM position doesn't matter.
@@ -872,6 +901,7 @@ export function createHud(root, api) {
     rallyBtn._tip,
     retreatBtn._tip,
     connectBtn._tip,
+    conduitBtn._tip,
     inboundBtn._tip,
   );
 
@@ -998,6 +1028,7 @@ export function createHud(root, api) {
     rallyBtn.style.display = owned ? "" : "none";
     retreatBtn.style.display = owned ? "" : "none";
     connectBtn.style.display = owned ? "" : "none";
+    conduitBtn.style.display = owned ? "" : "none";
     hint.style.display = owned ? "" : "none";
     if (owned) {
       const seeds = playerSeeds(world, HUMAN);
@@ -1122,6 +1153,15 @@ export function createHud(root, api) {
           ? `Build a one-way travel link to another body you control — needs ${CONNECT_ENERGY_COST} stored energy here (you have ${Math.floor(a.energy)}).`
           : `Build a one-way travel link to another body you control: click, then pick the target. Costs ${CONNECT_ENERGY_COST} energy from this rock.`,
       );
+
+      const piping = api.isConduitMode && api.isConduitMode();
+      setProp(conduitBtn, "variant", piping ? "brand" : "neutral");
+      setHtml(
+        conduitBtn,
+        piping
+          ? '<i slot="start" class="fa-solid fa-xmark"></i>Cancel conduit'
+          : '<i slot="start" class="fa-solid fa-bolt"></i>Build Conduit',
+      );
       hint.textContent = firing
         ? "Click any body to bombard it — Esc to cancel."
         : arming
@@ -1130,7 +1170,9 @@ export function createHud(root, api) {
             ? "Click another body you control as the fallback — Esc to cancel."
             : connecting
               ? "Click another body you control to build a permanent link."
-              : "Drag from this asteroid to a target to send seedlings.";
+              : piping
+                ? "Click another body you control to pipe energy to it."
+                : "Drag from this asteroid to a target to send seedlings.";
     }
 
     // Inbound-rally toggle works for ANY selected body (e.g. inspect which of your rocks
@@ -1157,6 +1199,8 @@ export function createHud(root, api) {
       api.isRallyMode && api.isRallyMode() ? "flex" : "none";
     connectBanner.style.display =
       api.isConnectMode && api.isConnectMode() ? "flex" : "none";
+    conduitBanner.style.display =
+      api.isConduitMode && api.isConduitMode() ? "flex" : "none";
     fireBanner.style.display =
       api.isFireMode && api.isFireMode() ? "flex" : "none";
     // Enemy-bombardment warning: any live non-human battery currently charging.
@@ -1187,6 +1231,7 @@ export function createHud(root, api) {
     panel.remove();
     rallyBanner.remove();
     connectBanner.remove();
+    conduitBanner.remove();
     fireBanner.remove();
     warnBanner.remove();
     minimap.destroy();

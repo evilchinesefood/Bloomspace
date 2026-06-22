@@ -116,6 +116,9 @@ export function serialize(world) {
     // Staged command queue — plain intent objects (type/owner/from/to/fraction/rock/treeType).
     // Empty in normal play; human staged-while-paused orders populate it (step 10).
     pendingCommands: cloneJson(world.pendingCommands ?? []),
+    // Energy conduits — explicit world-level list of {from,to,owner}. ADDITIVE (rides SAVE_VERSION
+    // 2 + `?? []`): a v2 save lacking conduits restores []. Validated on restore (drop malformed).
+    conduits: cloneJson(world.conduits ?? []),
   };
 }
 
@@ -250,6 +253,28 @@ export function deserialize(saved) {
         isBodyId(c.from) &&
         isBodyId(c.to) &&
         isBodyId(c.rock),
+    ),
+  );
+
+  // conduits — validate-on-restore (mirrors pendingCommands): keep only plain objects with integer
+  // from/to in [0, asteroids.length), from !== to, and owner in [0, players.length). Drop malformed
+  // entries; never throw. Default []. A v2 save without conduits restores [] (the ?? above).
+  const rawConduits = Array.isArray(saved.conduits) ? saved.conduits : [];
+  world.conduits = cloneJson(
+    rawConduits.filter(
+      (c) =>
+        c !== null &&
+        typeof c === "object" &&
+        Number.isInteger(c.from) &&
+        c.from >= 0 &&
+        c.from < nAst &&
+        Number.isInteger(c.to) &&
+        c.to >= 0 &&
+        c.to < nAst &&
+        c.from !== c.to &&
+        Number.isInteger(c.owner) &&
+        c.owner >= 0 &&
+        c.owner < nPly,
     ),
   );
 
