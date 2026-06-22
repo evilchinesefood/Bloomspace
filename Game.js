@@ -160,7 +160,6 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
       } else if (type === EVENT.SEND) {
         if (own === 0) sound.play("send");
       } else if (type === EVENT.CAPTURE) {
-        if (own === 0) sound.play("capture");
         if (!reducedMotion() && !fogHidden(ev.x[k], ev.y[k])) {
           // Escalate burst for rapid player-0 captures (combo); other owners get base scale.
           let scale = 1;
@@ -169,9 +168,15 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
             else comboCount = 1;
             comboLastMs = now;
             scale = Math.min(comboCount, 3);
-            if (scale > 1) sound.play("capture", { rate: 0.9 + scale * 0.1 });
+            // Pitch the capture cue up with combo (replaces the base play below).
+            sound.play(
+              "capture",
+              scale > 1 ? { rate: 0.9 + scale * 0.1 } : undefined,
+            );
           }
           fx.spawnCapture(ev.x[k], ev.y[k], ownerColorHex(ev.owner[k]), scale);
+        } else if (own === 0) {
+          sound.play("capture"); // reduced-motion or fog-hidden: audio only for player-0
         }
       } else if (type === EVENT.WIN) sound.play("win");
       else if (type === EVENT.LOSE) sound.play("lose");
