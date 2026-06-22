@@ -365,6 +365,13 @@ export function showSkirmishSetup(mount, { onConfirm, onCancel }) {
     // OFF by default (opt-in) — absent `checked` attribute = off; prefill() also sets it.
   });
 
+  // Wormholes toggle. Default OFF — adds a far-apart capturable wormhole pair linked by a 1-hop
+  // travel shortcut; opt-in like events/fog. The sim defaults OFF when config.wormholes is absent.
+  const wormholeSwitch = el("wa-switch", {
+    textContent: "Wormholes",
+    // OFF by default (opt-in) — absent `checked` attribute = off; prefill() also sets it.
+  });
+
   // Map size preset nudges the default asteroid count AND clamps the slider's max to a count
   // the chosen map can actually fit (rejection sampling caps placement far below big requests:
   // ~16 small / ~36 medium / 60 large). Keeps the request honest with no MapGen change.
@@ -399,6 +406,7 @@ export function showSkirmishSetup(mount, { onConfirm, onCancel }) {
     section("Hazards"),
     field(eventsSwitch),
     field(fogSwitch),
+    field(wormholeSwitch),
   );
 
   const cancelBtn = el("wa-button", {
@@ -463,6 +471,7 @@ export function showSkirmishSetup(mount, { onConfirm, onCancel }) {
       startTree: true, // every spawn home starts with one mature seedling tree (produces from t=0)
       events: eventsSwitch.checked === true, // environmental hazards (flares + meteors), opt-in
       fog: fogSwitch.checked === true, // fog of war (last-known visibility + blind AI), opt-in
+      wormholes: wormholeSwitch.checked === true, // a far-apart 1-hop wormhole pair, opt-in
       winConfig: { mode, timeLimitSecs },
     });
   });
@@ -481,6 +490,7 @@ export function showSkirmishSetup(mount, { onConfirm, onCancel }) {
     layoutSel.value = "scatter";
     eventsSwitch.checked = false;
     fogSwitch.checked = false;
+    wormholeSwitch.checked = false;
     applySizeToSlider(); // clamp slider max to the (medium) default size
   };
   if (window.customElements && customElements.whenDefined) {

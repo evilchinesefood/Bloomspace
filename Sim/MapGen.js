@@ -725,6 +725,112 @@ export function applyBeltEdgeRemoval(world) {
   rebuildNav(world);
 }
 
+// Wormhole bodies are plain habitable rocks (capturable, can be a hop) plus a few marker fields.
+// kind:"wormhole" so render draws a distinct portal mesh; wormholeId points at the partner; it grows
+// no trees (simplest — a plain habitable rock, like a fresh asteroid) but otherwise behaves normally.
+const WORMHOLE_MIN_R = 30;
+const WORMHOLE_MAX_R = 46;
+
+// addWormholeEdge — the symmetric 1-hop wormhole edge between bodies i and j, mirroring
+// addConnection's neighbor-edge writes (sorted, dedup). NO rng, NO rebuildNav (the caller rebuilds
+// nav once at gen-end). Used only at generation time on the freshly-appended pair.
+function addWormholeEdge(asteroids, i, j) {
+  const A = asteroids[i];
+  const B = asteroids[j];
+  if (!A.neighbors.includes(j))
+    A.neighbors = [...A.neighbors, j].sort((a, b) => a - b);
+  if (!B.neighbors.includes(i))
+    B.neighbors = [...B.neighbors, i].sort((a, b) => a - b);
+}
+
+// tagWormholes — gated behind config.wormholes (default OFF). Runs at the very END of generation
+// (after base layout + homes + seedlings + specials) so it only APPENDS bodies + draws rng HERE ⇒
+// a wormholes-ON world and a wormholes-OFF world for the same seed share the EXACT base layout,
+// stats, homes, seedlings, and specials. Appends ONE pair of habitable kind:"wormhole" bodies placed
+// FAR APART (rejection-sampled at opposite corners) so the 1-hop shortcut between them is meaningful,
+// links them via the symmetric neighbors edge (the wormhole travel edge), tags each rock.wormholeId,
+// records {a,b} in world.wormholes, and rebuilds nav so routing crosses the shortcut. id===index is
+// preserved (bodies appended, never reordered). Returns the pair or null if placement failed.
+function tagWormholes(world) {
+  const { rng, asteroids, width, height } = world;
+  // Place each end in OPPOSITE map halves (split along the anti-diagonal: x/width + y/height < 1 is
+  // the top-left half, > 1 the bottom-right) so the pair is genuinely cross-map. Rejection-sample
+  // uniformly across the WHOLE field (clamped off the border) and keep only candidates in the wanted
+  // half — broad sampling reliably seats an end even on a crowded map. Reject against existing bodies
+  // so an end never overlaps one; if the field is too full after many tries, abort cleanly (no partial
+  // pair — rng already drawn, OFF path still byte-identical).
+  // Strongly favor the half's FAR CORNER (diagonal coord past 0.7 / before 1.3) for the first run of
+  // attempts so the two ends land far apart (a meaningful shortcut); relax to the whole half after, so
+  // a crowded corner still seats an end rather than aborting the pair.
+  const place = (farHalf) => {
+    for (let attempt = 0; attempt < 400; attempt++) {
+      const radius = WORMHOLE_MIN_R + rng() * (WORMHOLE_MAX_R - WORMHOLE_MIN_R);
+      const x = EDGE_PAD + radius + rng() * (width - 2 * (EDGE_PAD + radius));
+      const y = EDGE_PAD + radius + rng() * (height - 2 * (EDGE_PAD + radius));
+      const diag = x / width + y / height; // anti-diagonal coord in [0,2]
+      const corner = attempt < 250 ? 0.7 : 1; // tighten to the far corner first, then the half
+      const inZone = farHalf ? diag > 2 - corner : diag < corner;
+      if (!inZone) continue;
+      const cand = { x, y, radius, kind: "asteroid" };
+      let ok = true;
+      for (const a of asteroids) {
+        const need = a.radius + radius + MIN_GAP + envExtra(a) + envExtra(cand);
+        if (dist(a, cand) < need) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return { x, y, radius };
+    }
+    return null;
+  };
+  const pa = place(false); // top-left half
+  const pb = place(true); // bottom-right half
+  if (!pa || !pb) return null; // couldn't seat both ends → no wormholes this map (rng already drawn)
+
+  const ia = asteroids.length;
+  const A = makeBody(ia, pa.x, pa.y, pa.radius, "wormhole", rng);
+  asteroids.push(A);
+  const ib = asteroids.length;
+  const B = makeBody(ib, pb.x, pb.y, pb.radius, "wormhole", rng);
+  asteroids.push(B);
+  // kind:"wormhole" is not in makeBody's habitable set — force habitable so the ends are capturable
+  // ("ownership via last-holder", like any asteroid). Otherwise plain habitable rocks (grow no trees).
+  A.habitable = true;
+  B.habitable = true;
+  A.wormholeId = ib;
+  B.wormholeId = ia;
+  // The wormhole travel edge: each end lists the OTHER (a symmetric 1-hop shortcut across the map).
+  addWormholeEdge(asteroids, ia, ib);
+  // Each end must also splice into the LOCAL graph so the shortcut is reachable + meaningful: connect
+  // it to its nearest NON-LEAF, NON-wormhole body (mirrors the local-edge writes). Without this the
+  // pair would be a disconnected 2-body island. RNG-free (nearest by distance). The combined route
+  // near-A → A → (wormhole) → B → near-B is then a genuine fast cross-map path that BFS uses when it
+  // saves hops. id===index preserved; nav rebuilt below.
+  const nearestAnchor = (end) => {
+    let best = -1;
+    let bd = Infinity;
+    for (let k = 0; k < asteroids.length; k++) {
+      const o = asteroids[k];
+      if (o.id === ia || o.id === ib || o.kind === "wormhole") continue;
+      if (isLeaf(asteroids, k)) continue; // never a leaf's single parent edge
+      const d = dist(o, end);
+      if (d < bd) {
+        bd = d;
+        best = k;
+      }
+    }
+    return best;
+  };
+  const na = nearestAnchor(A);
+  const nb = nearestAnchor(B);
+  if (na >= 0) addWormholeEdge(asteroids, ia, na);
+  if (nb >= 0) addWormholeEdge(asteroids, ib, nb);
+  world.wormholes.push({ a: ia, b: ib });
+  rebuildNav(world);
+  return { a: ia, b: ib };
+}
+
 // generateMap — populate world.asteroids, network, and each player's home orbit.
 export function generateMap(world, config = {}, spawnSeedling) {
   const players = world.players;
@@ -791,6 +897,13 @@ export function generateMap(world, config = {}, spawnSeedling) {
     world.nebulae = [];
     world.belts = [];
   }
+
+  // Wormholes LAST: gated behind config.wormholes (default OFF, like specials/events/fog). Appends
+  // ONE far-apart habitable pair + a symmetric 1-hop neighbors edge + local splices, drawing rng ONLY
+  // here so a wormholes-OFF world is byte-identical to a pre-wormhole world for the same seed. The
+  // edge rides asteroid cloneJson + rebuildNav reconstructs nav on resume → routing resumes identically
+  // with no special save logic for the edge itself.
+  if (config.wormholes) tagWormholes(world);
 
   return world;
 }

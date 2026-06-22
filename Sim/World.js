@@ -256,6 +256,13 @@ export function createWorld(config = {}) {
   // each tick (Economy.updateConduits). World-level + JSON-serializable (Save rides v2 + `?? []`).
   // Empty in normal play → updateConduits + the sever-on-flip filter are no-ops → byte-identical.
   world.conduits = [];
+  // Wormhole pairs (Feature 13) — each {a,b} is a 1-hop travel shortcut between two distant bodies.
+  // The actual routing edge lives in each paired body's `.neighbors` (so it rides asteroid cloneJson
+  // + rebuildNav reconstructs nav identically on resume); world.wormholes is the explicit pair list
+  // for render + restore validation. Default [] (gated behind config.wormholes in generateMap, drawn
+  // only in that gated pass AFTER the base layout) → an OFF world is byte-identical. Rides SAVE_VERSION
+  // 2 + `?? []`.
+  world.wormholes = [];
   // Procedurally place asteroids + seed each player's home orbit (deterministic).
   generateMap(world, config, spawnSeedling);
   // Assign personality to each AI player AFTER map generation. No world.rng() is consumed here

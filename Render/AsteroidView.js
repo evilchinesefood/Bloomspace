@@ -251,6 +251,57 @@ function blackholeTexture() {
   return t;
 }
 
+// A wormhole portal: a swirling violet/cyan vortex — concentric rings spiralling into a bright
+// core, distinct from the star (gold disc) and black hole (dark void). It blooms. Cached module-wide.
+let _wormholeTex = null;
+function wormholeTexture() {
+  if (_wormholeTex) return _wormholeTex;
+  const s = 128;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = s;
+  const ctx = cv.getContext("2d");
+  // Base radial: bright core fading through violet→cyan to a transparent edge.
+  const g = ctx.createRadialGradient(
+    s / 2,
+    s / 2,
+    s * 0.04,
+    s / 2,
+    s / 2,
+    s / 2,
+  );
+  g.addColorStop(0, "#ffffff");
+  g.addColorStop(0.3, "#9a7bff");
+  g.addColorStop(0.62, "#4cc2ff");
+  g.addColorStop(0.85, "#2a4cff");
+  g.addColorStop(1, "rgba(20,20,60,0)");
+  ctx.fillStyle = g;
+  disc(ctx, s);
+  ctx.fill();
+  // Spiral arms: thin bright strokes winding into the core so it reads as a vortex, not a flat disc.
+  ctx.save();
+  disc(ctx, s);
+  ctx.clip();
+  ctx.lineWidth = 1.4;
+  for (let arm = 0; arm < 3; arm++) {
+    ctx.beginPath();
+    const off = (arm / 3) * Math.PI * 2;
+    for (let t = 0; t < 1; t += 0.02) {
+      const ang = off + t * Math.PI * 4;
+      const rr = t * s * 0.46;
+      const px = s / 2 + Math.cos(ang) * rr;
+      const py = s / 2 + Math.sin(ang) * rr;
+      if (t === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.strokeStyle = "rgba(220,235,255,0.5)";
+    ctx.stroke();
+  }
+  ctx.restore();
+  _wormholeTex = new THREE.CanvasTexture(cv);
+  _wormholeTex.colorSpace = THREE.SRGBColorSpace;
+  return _wormholeTex;
+}
+
 // Soft radial falloff (white core → transparent) for additive glow halos. Cached module-wide.
 let _glowTex = null;
 function radialGlowTexture() {
@@ -344,6 +395,7 @@ export function sharedTextures() {
   if (_glowTex) out.push(_glowTex);
   if (_nebulaTex) out.push(_nebulaTex);
   if (_beltTex) out.push(_beltTex);
+  if (_wormholeTex) out.push(_wormholeTex);
   return out;
 }
 
@@ -577,6 +629,38 @@ export function createAsteroidView(scene, world, camCtl, fx) {
       halo.scale.set(hs, hs, 1);
       scene.add(halo);
       bodyHalo[i] = halo;
+    } else if (a.kind === "wormhole") {
+      // Wormhole end: a swirling portal disc + an additive violet/cyan halo so it reads as a vortex,
+      // distinct from the star/black hole. It's a habitable (capturable) body, so the owner rim (the
+      // rims loop, below) still tints it. Slowly spun in update() unless reduced-motion.
+      const body = new THREE.Mesh(
+        new THREE.CircleGeometry(1, 48),
+        new THREE.MeshBasicMaterial({
+          map: wormholeTexture(),
+          color: 0xffffff, // bright → the portal blooms
+          transparent: true,
+        }),
+      );
+      body.position.set(a.x, a.y, -2);
+      body.scale.set(a.radius, a.radius, 1);
+      scene.add(body);
+      bodyMesh[i] = body;
+      const halo = new THREE.Mesh(
+        new THREE.CircleGeometry(1, 40),
+        new THREE.MeshBasicMaterial({
+          map: radialGlowTexture(),
+          color: 0x7a8cff,
+          transparent: true,
+          opacity: 0.5,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        }),
+      );
+      const hs = a.radius * 1.9;
+      halo.position.set(a.x, a.y, -1.7);
+      halo.scale.set(hs, hs, 1);
+      scene.add(halo);
+      bodyHalo[i] = halo;
     }
   }
 
@@ -697,6 +781,26 @@ export function createAsteroidView(scene, world, camCtl, fx) {
     getPoint: (id) => rocks[id],
   });
   conduitLayer.update(false, () => false);
+
+  // --- Wormhole shortcuts (world.wormholes): a bright dashed violet line per pair, scrolling its
+  //     dash to read as a portal-to-portal channel. Distinct from links (solid teal) + conduits
+  //     (dashed amber). Reduce-motion gates the scroll. Empty list → nothing renders. Disposed with
+  //     the scene graph (Game.disposeSceneGraph traverses + frees it). ---
+  const wormholeLayer = createEdgeLayer(scene, {
+    color: 0x9a7bff,
+    opacity: 0.7,
+    z: -2.08,
+    dashed: true,
+    dashSize: 22,
+    gapSize: 12,
+    getList: () => (world.wormholes || []).map((p) => [p.a, p.b]),
+    getPoint: (id) => rocks[id],
+  });
+  wormholeLayer.update(false, () => false);
+  // Wormhole ids (for the slow portal spin in update()): a static list — wormhole ends never move.
+  const wormholeIds = [];
+  for (let i = 0; i < n; i++)
+    if (rocks[i].kind === "wormhole") wormholeIds.push(i);
 
   // --- LOD aggregate glow ---
   const glow = new THREE.InstancedMesh(
@@ -976,6 +1080,16 @@ export function createAsteroidView(scene, world, camCtl, fx) {
     // isn't reduced (a no-op in solid mode, but conduits are dashed).
     conduitLayer.update(hasMoving, (id) => movingFlag[id]);
     if (!reducedMotion) conduitLayer.animate(dt);
+    // Wormhole edges rebuild on pair-count change (ends never move → never an "endpoint moving"
+    // rewrite); scroll the dash + slowly spin each portal disc unless motion is reduced.
+    wormholeLayer.update(false, () => false);
+    if (!reducedMotion) {
+      wormholeLayer.animate(dt);
+      for (const id of wormholeIds) {
+        const bm = bodyMesh[id];
+        if (bm && !rocks[id].dead) bm.rotation.z = clock * 0.6;
+      }
+    }
 
     // selection ring tracks the (possibly moving) selected rock
     const sel = selectedId >= 0 ? rocks[selectedId] : null;

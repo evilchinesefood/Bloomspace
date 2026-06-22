@@ -119,6 +119,11 @@ export function serialize(world) {
     // Energy conduits — explicit world-level list of {from,to,owner}. ADDITIVE (rides SAVE_VERSION
     // 2 + `?? []`): a v2 save lacking conduits restores []. Validated on restore (drop malformed).
     conduits: cloneJson(world.conduits ?? []),
+    // Wormhole pairs — explicit world-level list of {a,b} (the render + restore-validation record).
+    // ADDITIVE (rides SAVE_VERSION 2 + `?? []`): a v2 save lacking wormholes restores []. The actual
+    // routing edge lives in each end's asteroid.neighbors (serialized whole) + rebuildNav reconstructs
+    // nav, so routing resumes identically with no extra edge save logic. Validated on restore.
+    wormholes: cloneJson(world.wormholes ?? []),
   };
 }
 
@@ -275,6 +280,30 @@ export function deserialize(saved) {
         Number.isInteger(c.owner) &&
         c.owner >= 0 &&
         c.owner < nPly,
+    ),
+  );
+
+  // wormholes — validate-on-restore: keep only plain {a,b} pairs where a,b are integers in
+  // [0, asteroids.length), a !== b, AND the pairing is symmetric in the restored bodies
+  // (asteroids[a].wormholeId === b && asteroids[b].wormholeId === a). Drop corrupt/asymmetric pairs
+  // (no throw); default []. A v2 save without wormholes restores [] (the ?? above). The routing edge
+  // itself lives in each end's .neighbors (already restored), so rebuildNav below reconstructs nav.
+  const wormholeAsts = world.asteroids;
+  const rawWormholes = Array.isArray(saved.wormholes) ? saved.wormholes : [];
+  world.wormholes = cloneJson(
+    rawWormholes.filter(
+      (w) =>
+        w !== null &&
+        typeof w === "object" &&
+        Number.isInteger(w.a) &&
+        w.a >= 0 &&
+        w.a < nAst &&
+        Number.isInteger(w.b) &&
+        w.b >= 0 &&
+        w.b < nAst &&
+        w.a !== w.b &&
+        wormholeAsts[w.a].wormholeId === w.b &&
+        wormholeAsts[w.b].wormholeId === w.a,
     ),
   );
 
