@@ -6,10 +6,14 @@ import {
   plantTree,
   clearTrees,
   updateTrees,
+  updateAura,
   TREE_SEED_COST,
   TREE_ENERGY_COST,
   DEFENDERS_PER_TREE,
+  SYM_BONUS,
 } from "./Trees.js";
+import { updateEconomy } from "./Economy.js";
+import { serialize, deserialize } from "./Save.js";
 import { setRally } from "./Seedlings.js";
 
 const DT = 1 / 30;
@@ -457,6 +461,156 @@ test("defense tree at SoA capacity spawns no defender and spends no energy", () 
     rock.energy,
     100,
     "no energy spent when the spawn is dropped at capacity",
+  );
+});
+
+// --- Symbiosis tree + aura --------------------------------------------------
+
+// Wire a tiny deterministic adjacency: pick 4 owned-able rocks A,B,C,D, set their owners and a
+// neighbor graph A↔B (same owner), A↔C (enemy), with D not adjacent to A. Plant a MATURE symbiosis
+// tree on A. Returns the rocks so each test asserts the aura it cares about.
+function symSetup(w) {
+  const rocks = w.asteroids.filter((a) => a.kind === "asteroid" && !a.moon);
+  const [A, B, C, D] = rocks;
+  A.owner = 0;
+  B.owner = 0;
+  C.owner = 1;
+  D.owner = 0;
+  A.dead = B.dead = C.dead = D.dead = false;
+  A.neighbors = [B.id, C.id].sort((a, b) => a - b);
+  B.neighbors = [A.id];
+  C.neighbors = [A.id];
+  D.neighbors = []; // not adjacent to A
+  A.trees = [{ type: "symbiosis", level: 1, growth: 1 }]; // mature emitter
+  B.trees = [];
+  C.trees = [];
+  D.trees = [];
+  return { A, B, C, D };
+}
+
+test("plantTree accepts symbiosis at the flat cost; tree is inert (no orbiters)", () => {
+  const w = world();
+  const rock = ownedRock(w);
+  rock.energy = 100;
+  const player = w.players[0];
+  const seeds0 = player.seeds;
+  assert.equal(plantTree(w, rock.id, "symbiosis", 0), true);
+  const tree = rock.trees[rock.trees.length - 1];
+  assert.equal(tree.type, "symbiosis");
+  assert.equal(player.seeds, seeds0 - TREE_SEED_COST, "flat seed cost");
+  assert.equal(rock.energy, 100 - TREE_ENERGY_COST, "flat energy cost");
+  // Mature it and run updateTrees: a symbiosis tree must NOT produce orbiters or flower seeds.
+  tree.growth = 1;
+  rock.energy = 999;
+  const units0 = ownerSeedlings(w, 0);
+  const seeds1 = player.seeds;
+  for (let t = 0; t < 600; t++) updateTrees(w, DT);
+  assert.equal(
+    ownerSeedlings(w, 0),
+    units0,
+    "symbiosis tree spawns no orbiters",
+  );
+  assert.equal(player.seeds, seeds1, "symbiosis tree flowers no seeds");
+});
+
+test("updateAura buffs ONLY adjacent same-owner rocks; enemy/non-adjacent/self stay 1", () => {
+  const w = world();
+  const { A, B, C, D } = symSetup(w);
+  updateAura(w);
+  assert.equal(B.symAura, 1 + SYM_BONUS, "same-owner neighbor of A is buffed");
+  assert.equal(
+    A.symAura,
+    1,
+    "A has no neighbor with symbiosis → A itself stays 1",
+  );
+  assert.equal(C.symAura, 1, "enemy-owned neighbor is NOT buffed");
+  assert.equal(D.symAura, 1, "non-adjacent same-owner rock stays 1");
+});
+
+test("immature symbiosis tree emits no aura; a dead emitter neighbor doesn't buff", () => {
+  const w = world();
+  const { A, B } = symSetup(w);
+  A.trees[0].growth = 0.5; // not mature
+  updateAura(w);
+  assert.equal(B.symAura, 1, "immature symbiosis → no aura");
+  A.trees[0].growth = 1;
+  A.dead = true; // emitter destroyed
+  updateAura(w);
+  assert.equal(B.symAura, 1, "dead emitter contributes no aura");
+});
+
+test("aura buff shows in a consumer: an adjacent rock regenerates energy faster", () => {
+  const w = world();
+  const { A, B } = symSetup(w);
+  updateAura(w);
+  // Two identical rocks, one auraed (B, adjacent to A) and one neutral baseline. Compare regen.
+  B.energy = 100;
+  B.energyStat = 100;
+  B.energyMult = 1;
+  B.special = undefined;
+  const base = { ...B, symAura: 1, energy: 100 }; // a clone with aura forced to 1
+  w.asteroids.push(base); // temporary baseline rock (owned, regen-eligible)
+  base.id = w.asteroids.length - 1;
+  base.owner = 0;
+  base.dead = false;
+  updateEconomy(w, DT);
+  assert.ok(
+    B.energy > base.energy,
+    "auraed rock regenerated more energy than the symAura=1 baseline",
+  );
+  // And the gain ratio reflects SYM_BONUS exactly (rates differ only by the aura factor).
+  const gainB = B.energy - 100;
+  const gainBase = base.energy - 100;
+  assert.ok(
+    Math.abs(gainB / gainBase - (1 + SYM_BONUS)) < 1e-6,
+    "regen gain scales by the aura factor",
+  );
+});
+
+test("default-neutral: with no symbiosis planted, every symAura is 1 (consumers unchanged)", () => {
+  const w = world();
+  // Warm a few real steps; no symbiosis exists, so every rock's aura must be exactly 1.
+  for (let t = 0; t < 60; t++) Sim.step(w, DT);
+  for (const a of w.asteroids)
+    assert.equal(a.symAura, 1, `rock ${a.id} symAura must be neutral`);
+});
+
+test("save round-trip: a symbiosis tree survives; symAura is transient (not serialized)", () => {
+  const w = world();
+  const rock = ownedRock(w);
+  rock.energy = 100;
+  w.players[0].seeds = 50;
+  assert.ok(plantTree(w, rock.id, "symbiosis", 0));
+  rock.trees[rock.trees.length - 1].growth = 1;
+  // Run a step so updateAura sets a (neutral, =1) symAura on every rock.
+  Sim.step(w, DT);
+  assert.equal(typeof rock.symAura, "number", "live world has a symAura");
+
+  const saved = serialize(w);
+  // symAura must NOT be serialized (transient) — assert it's absent from every saved asteroid.
+  for (const a of saved.asteroids)
+    assert.equal("symAura" in a, false, "symAura is not serialized");
+  // The symbiosis tree DID round-trip (it's a normal tree object in `trees`).
+  const savedRock = saved.asteroids[rock.id];
+  assert.ok(
+    savedRock.trees.some((t) => t.type === "symbiosis" && t.growth >= 1),
+    "mature symbiosis tree survived serialize",
+  );
+
+  const w2 = deserialize(saved);
+  assert.ok(w2, "deserialize produced a world");
+  // Before the first step, the restored rock carries no symAura (it was transient).
+  assert.equal(
+    w2.asteroids[rock.id].symAura,
+    undefined,
+    "symAura not restored",
+  );
+  // The first step recomputes it (updateAura runs before resolveCombat) so resume matches.
+  Sim.step(w2, DT);
+  assert.equal(
+    typeof w2.asteroids[rock.id].symAura,
+    "number",
+    "symAura recomputed on the first step after restore",
   );
 });
 

@@ -77,8 +77,16 @@ export function serialize(world) {
     status: world.status,
     rngState: world.rng.getState(),
     seed,
-    // Asteroids are plain data (id===index) — deep-clone the whole array verbatim.
-    asteroids: world.asteroids.map(cloneJson),
+    // Asteroids are plain data (id===index) — deep-clone the whole array verbatim. symAura is the
+    // ONE transient field on a rock (derived from its neighbors' symbiosis trees, recomputed by
+    // updateAura every tick BEFORE combat) — strip it so the save is byte-identical to a pre-
+    // symbiosis save and the first step after restore recomputes it. The symbiosis tree itself is
+    // a normal tree object inside `trees`, so it round-trips with no Save schema change.
+    asteroids: world.asteroids.map((a) => {
+      const c = cloneJson(a);
+      delete c.symAura;
+      return c;
+    }),
     players,
     links: cloneJson(world.links ?? []),
     nebulae: cloneJson(world.nebulae ?? []),

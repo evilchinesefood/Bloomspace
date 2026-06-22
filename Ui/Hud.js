@@ -662,10 +662,17 @@ export function createHud(root, api) {
     style: "width:100%;margin-bottom:.4rem;",
     html: '<i slot="start" class="fa-solid fa-shield-halved"></i>Plant Defense Tree',
   });
+  const plantSymBtn = el("wa-button", {
+    size: "small",
+    style: "width:100%;margin-bottom:.4rem;",
+    html: '<i slot="start" class="fa-solid fa-leaf"></i>Plant Symbiosis Tree',
+  });
   plantSeedBtn.addEventListener("click", () => api.onPlant("seedling"));
   plantDefBtn.addEventListener("click", () => api.onPlant("defense"));
+  plantSymBtn.addEventListener("click", () => api.onPlant("symbiosis"));
   plantSeedBtn._tip = tip(plantSeedBtn, "");
   plantDefBtn._tip = tip(plantDefBtn, "");
+  plantSymBtn._tip = tip(plantSymBtn, "");
 
   // Plant Bombard Tree — escalating cost per current count, capped at BATTERY_SIZE. Five mature
   // bombard trees arm the rock as a superweapon battery.
@@ -796,6 +803,7 @@ export function createHud(root, api) {
     sendSlider,
     plantSeedBtn,
     plantDefBtn,
+    plantSymBtn,
     plantBombBtn,
     bombStatusEl,
     clearTreesBtn,
@@ -811,6 +819,7 @@ export function createHud(root, api) {
     upgSpdBtn._tip,
     plantSeedBtn._tip,
     plantDefBtn._tip,
+    plantSymBtn._tip,
     plantBombBtn._tip,
     clearTreesBtn._tip,
     fireBtn._tip,
@@ -861,16 +870,19 @@ export function createHud(root, api) {
     spBar.set(a.speedStat);
     energyEl.textContent = `Stored energy: ${Math.round(a.energy)}`;
     let seedT = 0,
-      defT = 0;
+      defT = 0,
+      symT = 0;
     for (const t of a.trees) {
       if (t.type === "seedling") seedT++;
       else if (t.type === "defense") defT++;
+      else if (t.type === "symbiosis") symT++;
     }
     const bombT = countBombard(a);
     treesEl.textContent =
       a.trees.length === 0
         ? "No trees."
         : `Trees: ${seedT} seedling, ${defT} defense` +
+          (symT ? `, ${symT} symbiosis` : "") +
           (bombT ? `, ${bombT} bombard` : "");
 
     // Orbiting ships at this body (fighters / defenders / enemies). Selected-body only.
@@ -931,6 +943,7 @@ export function createHud(root, api) {
     sendSlider.style.display = owned ? "" : "none";
     plantSeedBtn.style.display = owned ? "" : "none";
     plantDefBtn.style.display = owned ? "" : "none";
+    plantSymBtn.style.display = owned ? "" : "none";
     plantBombBtn.style.display = owned ? "" : "none";
     bombStatusEl.style.display = owned ? "" : "none";
     clearTreesBtn.style.display =
@@ -946,6 +959,7 @@ export function createHud(root, api) {
         seeds >= TREE_SEED_COST && a.energy >= TREE_ENERGY_COST;
       setProp(plantSeedBtn, "disabled", !affordable);
       setProp(plantDefBtn, "disabled", !affordable);
+      setProp(plantSymBtn, "disabled", !affordable);
       const costTxt = affordable
         ? `Costs ${TREE_SEED_COST} seeds + ${TREE_ENERGY_COST} energy.`
         : `Need ${TREE_SEED_COST} seeds + ${TREE_ENERGY_COST} energy.`;
@@ -956,6 +970,10 @@ export function createHud(root, api) {
       setTip(
         plantDefBtn._tip,
         `Plant a defense tree — spawns defenders that guard this rock (more mature defense trees → more defenders). ${costTxt}`,
+      );
+      setTip(
+        plantSymBtn._tip,
+        `Plant a symbiosis tree — once mature it buffs ADJACENT rocks you own (energy regen, garrison strength, and production). ${costTxt}`,
       );
 
       // --- Bombard battery: plant button (count N/5 + escalating cost), status, FIRE button ---

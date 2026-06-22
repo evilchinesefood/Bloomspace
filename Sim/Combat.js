@@ -158,8 +158,11 @@ export function resolveCombat(world, dt) {
     const o = s.owner[i];
     if (h < 0 || h >= A || o < 0 || o >= MAXO) continue;
     // Bake the owner's strength-tech factor into the per-owner sum so enemyStr below scales
-    // with the attacker's tech, and the pass stays order-independent (constant per-owner).
-    const buffed = s.strength[i] * strMult[o];
+    // with the attacker's tech, and the pass stays order-independent (constant per-owner). The
+    // symbiosis aura of the rock the ship is stationed on (h) buffs its garrison strength too
+    // (factor 1 with no adjacent symbiosis → byte-identical). h is already validated 0..A here.
+    const buffed =
+      s.strength[i] * strMult[o] * (world.asteroids[h].symAura || 1);
     strAt[h * MAXO + o] += buffed;
     totAt[h] += buffed;
   }

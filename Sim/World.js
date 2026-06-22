@@ -5,7 +5,7 @@ import { updateOrbits } from "./Moons.js";
 import { updateSeedlings, updateRally } from "./Seedlings.js";
 import { resolveCombat, updateRetreat } from "./Combat.js";
 import { updateEconomy } from "./Economy.js";
-import { updateTrees } from "./Trees.js";
+import { updateTrees, updateAura } from "./Trees.js";
 import { updateAi, checkVictory, PERSONALITY_NAMES } from "./Ai.js";
 import { updateBombard } from "./Bombard.js";
 import { initPlayerTech } from "./Tech.js";
@@ -381,6 +381,9 @@ export function step(world, dt) {
   updateRally(world, dt); // rallied rocks funnel their orbiting fighters to the anchor
   updateSeedlings(world, dt);
   destroyInBlackHoles(world); // any ship inside a black hole's orbit is annihilated
+  // Symbiosis aura: rng-free, recompute rock.symAura BEFORE combat so this tick's combat, economy,
+  // and tree production all read the same aura. Default-neutral (no symbiosis → symAura=1 → no-op).
+  updateAura(world);
   resolveCombat(world, dt);
   // Retreat & Regroup: armed rocks outmatched after THIS tick's combat flee to a fallback. Reads
   // Combat's strAt/totAt buffers (valid only right after resolveCombat), rng-free. retreatArmed

@@ -21,8 +21,11 @@ export function updateEconomy(world, dt) {
     const rich = rock.special === "rich" ? RICH_ENERGY_MULT : 1;
     const mult = (rock.energyMult || 1) * rich;
     const tech = ownerRegenMult(world, rock.owner);
+    // Symbiosis aura speeds regen on aura'd rocks (factor 1 with no adjacent symbiosis → no-op).
+    const aura = rock.symAura || 1;
     let e =
-      rock.energy + ENERGY_RATE * (rock.energyStat / 100) * mult * tech * dt;
+      rock.energy +
+      ENERGY_RATE * (rock.energyStat / 100) * mult * tech * aura * dt;
     const cap = ENERGY_MAX * mult;
     if (e > cap) e = cap;
     if (e < 0) e = 0;

@@ -34,6 +34,12 @@ export const DEFENSE_INTERVAL = 5; // defense tree: seconds between defender spa
 export const DEFENDER_ENERGY_COST = 6; // energy per defender spawn
 export const DEFENDERS_PER_TREE = 6; // defenders per mature defense tree
 
+// Symbiosis tree: a mature one emits a per-tick AURA that buffs each ADJACENT same-owner rock.
+// Per qualifying neighbor, that rock's symAura grows by SYM_BONUS; consumers read rock.symAura
+// (default 1) for combat strength, energy regen, and seedling production speed. The aura is the
+// tree's only effect — it is INERT in updateTrees (no orbiters, no flower), like bombard.
+export const SYM_BONUS = 0.15; // per adjacent mature symbiosis neighbor
+
 function playerById(world, id) {
   const ps = world.players;
   for (let i = 0; i < ps.length; i++) if (ps[i].id === id) return ps[i];
@@ -63,6 +69,45 @@ function matureDefenseCount(rock) {
   for (let i = 0; i < trees.length; i++)
     if (trees[i].type === "defense" && (trees[i].growth ?? 0) >= 1) n++;
   return n;
+}
+
+// True if `rock` carries at least one MATURE symbiosis tree (growth >= 1) — the aura emitter test.
+function hasMatureSymbiosis(rock) {
+  const trees = rock.trees;
+  for (let i = 0; i < trees.length; i++)
+    if (trees[i].type === "symbiosis" && (trees[i].growth ?? 0) >= 1)
+      return true;
+  return false;
+}
+
+// updateAura — rng-free per-tick pass: set rock.symAura on EVERY asteroid (index order) so consumers
+// (Combat/Economy/Trees) can read it unconditionally. A non-dead owned rock gains SYM_BONUS for each
+// of its neighbors that is same-owner, non-dead, and carries a mature symbiosis tree; neutral/dead
+// rocks and rocks with no qualifying neighbor → 1 (neutral). DERIVED from the trees (which serialize)
+// — symAura itself is TRANSIENT (recomputed each tick, never serialized). Default-neutral: with no
+// mature symbiosis adjacent, every symAura is 1, so all consumers are byte-identical to before.
+export function updateAura(world) {
+  const asts = world.asteroids;
+  for (let a = 0; a < asts.length; a++) {
+    const rock = asts[a];
+    if (rock.dead || rock.owner === OWNER_NEUTRAL) {
+      rock.symAura = 1;
+      continue;
+    }
+    let count = 0;
+    const nb = rock.neighbors;
+    for (let k = 0; k < nb.length; k++) {
+      const other = asts[nb[k]];
+      if (
+        other &&
+        !other.dead &&
+        other.owner === rock.owner &&
+        hasMatureSymbiosis(other)
+      )
+        count++;
+    }
+    rock.symAura = 1 + SYM_BONUS * count;
+  }
 }
 
 // plantTree — owner must own the rock and afford both seeds + energy. Deducts both and
@@ -163,9 +208,9 @@ export function updateTrees(world, dt) {
         tree.growth = Math.min(1, tree.growth + dt / GROW_TIME);
         if (tree.growth < 1) continue; // only mature trees produce
       }
-      // Bombard trees are inert once mature: they only arm the battery — never produce
-      // orbiters or flower seeds. (isArmed reads matureBombardCount; firing is in Bombard.js.)
-      if (tree.type === "bombard") continue;
+      // Bombard + symbiosis trees are inert once mature: bombard only arms the battery (firing is
+      // in Bombard.js); symbiosis only emits its aura (updateAura). Neither produces orbiters/flower.
+      if (tree.type === "bombard" || tree.type === "symbiosis") continue;
       if (tree.type === "defense") {
         tree.cooldown -= dt;
         if (tree.cooldown <= 0) {
@@ -190,7 +235,9 @@ export function updateTrees(world, dt) {
       // Seedling tree: produce orbiters (energy-gated) + flower into seeds.
       tree.cooldown -= dt;
       if (tree.cooldown <= 0) {
-        tree.cooldown = PRODUCE_INTERVAL;
+        // Symbiosis aura speeds production: shorter cooldown reset on an aura'd rock (factor 1 →
+        // exactly PRODUCE_INTERVAL → byte-identical when no symbiosis is adjacent).
+        tree.cooldown = PRODUCE_INTERVAL / (rock.symAura || 1);
         if (rock.energy >= SEEDLING_ENERGY_COST) {
           const i = spawnOrbiter(world, rock);
           // Only charge energy on a real spawn — at the seedling cap spawnOrbiter returns
@@ -216,4 +263,4 @@ export function updateTrees(world, dt) {
   }
 }
 
-export default { plantTree, clearTrees, updateTrees };
+export default { plantTree, clearTrees, updateTrees, updateAura };
