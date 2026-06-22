@@ -177,6 +177,7 @@ export function makeSeedArrays(capacity) {
     state: new Uint8Array(capacity),
     kind: new Uint8Array(capacity), // 0 fighter, 1 defender (defense-tree spawned)
     slingRem: new Float32Array(capacity), // signed radians left in a slingshot arc (state SLING)
+    raid: new Uint8Array(capacity), // 1 = a raider: slings the final dest instead of committing, then returns home
   };
 }
 
@@ -307,6 +308,7 @@ export function spawnSeedling(world, opts = {}) {
   s.state[i] = STATE.ORBIT;
   s.kind[i] = opts.kind ?? KIND.FIGHTER;
   s.slingRem[i] = 0;
+  s.raid[i] = 0; // freshly spawned ships never raid (set on launch by raidSeedlings)
   const cx = a ? a.x : 0;
   const cy = a ? a.y : 0;
   s.x[i] = cx + Math.cos(s.orbitAngle[i]) * s.orbitRadius[i];
@@ -338,6 +340,7 @@ export const SEED_FIELDS = [
   "state",
   "kind",
   "slingRem",
+  "raid",
 ];
 
 // killSeedling — swap-remove to keep arrays dense. Records an EVENT.DEATH at the dying ship's

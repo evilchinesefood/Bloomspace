@@ -13,7 +13,7 @@ import {
 import { serialize, deserialize, SAVE_VERSION } from "./Save.js";
 import { buyTech, TECH } from "./Tech.js";
 import { plantTree } from "./Trees.js";
-import { setRally, sendSeedlings } from "./Seedlings.js";
+import { setRally, sendSeedlings, raidSeedlings } from "./Seedlings.js";
 import { BATTERY_SIZE } from "./Bombard.js";
 
 const DT = 1 / 30;
@@ -55,6 +55,7 @@ function snap(w) {
     "state",
     "kind",
     "slingRem",
+    "raid",
   ];
   for (const f of fieldNames) fields[f] = Array.from(s[f].subarray(0, s.count));
   return {
@@ -381,6 +382,70 @@ test("SEED_FIELDS exactly matches makeSeedArrays' typed-array fields", () => {
     [...SEED_FIELDS].sort(),
     typedKeys.sort(),
     "SEED_FIELDS drifted from makeSeedArrays — update both together",
+  );
+});
+
+// --- 7b. MID-RAID ROUND-TRIP -----------------------------------------------
+// A raid sets the per-ship `raid` flag (a SoA field). Launch a raid at an enemy, step until some
+// raiders are in flight (TRANSIT or SLING with raid=1), then serialize → deserialize → step both:
+// the resumed world must match the never-saved run. This proves the `raid` field round-trips and
+// raid behavior (sling-the-target + return-home) continues deterministically across a save.
+test("mid-raid world round-trips and continues identically", () => {
+  const w1 = createWorld({
+    seed: 11,
+    asteroidCount: 16,
+    players: [
+      { id: 0, isAi: false, difficulty: 0 },
+      { id: 1, isAi: false, difficulty: 1 },
+    ],
+    width: 1200,
+    height: 1200,
+  });
+  const home0 = w1.asteroids.find((a) => a.owner === 0);
+  const home1 = w1.asteroids.find((a) => a.owner === 1);
+  const launched = raidSeedlings(w1, home0.id, home1.id, 1, 0);
+  assert.ok(launched >= 1, "raid launched at least one ship");
+  // Step until at least one raider is mid-flight (TRANSIT/SLING with raid=1) so the save captures
+  // a genuine in-flight raid, not just the launch tick.
+  const inFlight = () => {
+    const s = w1.seed;
+    for (let i = 0; i < s.count; i++)
+      if (
+        s.raid[i] === 1 &&
+        (s.state[i] === 1 || s.state[i] === 4) // TRANSIT | SLING
+      )
+        return true;
+    return false;
+  };
+  let guard = 0;
+  while (!inFlight() && guard++ < 500) step(w1, DT);
+  assert.ok(guard < 500, "a raider reached an in-flight state before the cap");
+  const raidersBefore = Array.from(
+    w1.seed.raid.subarray(0, w1.seed.count),
+  ).filter((r) => r === 1).length;
+  assert.ok(raidersBefore >= 1, "at least one raid=1 ship exists before save");
+
+  const w2 = deserialize(serialize(w1));
+  assert.ok(w2, "deserialize produced a world");
+  assert.deepEqual(
+    snap(w2),
+    snap(w1),
+    "restored mid-raid world == live (pre-step)",
+  );
+  // The raid flags survived the round-trip.
+  assert.deepEqual(
+    Array.from(w2.seed.raid.subarray(0, w2.seed.count)),
+    Array.from(w1.seed.raid.subarray(0, w1.seed.count)),
+    "raid flags round-tripped exactly",
+  );
+  for (let i = 0; i < 400; i++) {
+    step(w1, DT);
+    step(w2, DT);
+  }
+  assert.deepEqual(
+    snap(w2),
+    snap(w1),
+    "resumed mid-raid continuation diverged from never-saved run",
   );
 });
 

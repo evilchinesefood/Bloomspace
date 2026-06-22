@@ -75,6 +75,33 @@ test("applyCommand SEND dispatches to sendSeedlings (moves orbiters, returns cou
   assert.equal(orbitersAt(w, home.id, 0), before - sent);
 });
 
+test("applyCommand RAID dispatches to raidSeedlings (flags raiders raid=1, returns count)", () => {
+  const w = mk();
+  const home = homeOf(w, 0);
+  const neutral = neutralColonizable(w);
+  const before = orbitersAt(w, home.id, 0);
+  assert.ok(before > 0, "home should start with orbiters");
+  const sent = applyCommand(w, {
+    type: CMD.RAID,
+    from: home.id,
+    to: neutral.id,
+    fraction: 1,
+    owner: 0,
+  });
+  assert.ok(sent > 0, "RAID returns the count actually launched");
+  assert.equal(orbitersAt(w, home.id, 0), before - sent);
+  // Launched ships are flagged raiders heading to the neutral target.
+  let flagged = 0;
+  for (let i = 0; i < w.seed.count; i++)
+    if (
+      w.seed.state[i] === STATE.TRANSIT &&
+      w.seed.dest[i] === neutral.id &&
+      w.seed.raid[i] === 1
+    )
+      flagged++;
+  assert.equal(flagged, sent, "every launched raider is flagged raid=1");
+});
+
 test("applyCommand RALLY dispatches to setRally (sets anchor, returns true)", () => {
   const w = mk();
   const home = homeOf(w, 0);

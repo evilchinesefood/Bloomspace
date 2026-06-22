@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createWorld, OWNER_NEUTRAL, STATE, EVENT } from "./World.js";
-import { sendSeedlings, updateSeedlings } from "./Seedlings.js";
+import { sendSeedlings, raidSeedlings, updateSeedlings } from "./Seedlings.js";
 import Sim from "./World.js";
 
 const PLAYERS = [
@@ -279,4 +279,118 @@ test("a SLING ship whose center body is destroyed breaks off into TRANSIT", () =
     "ship leaves the dead body instead of orbiting a corpse",
   );
   assert.equal(s.slingRem[0], 0, "sling remainder cleared on break-off");
+});
+
+// --- RAIDS (#5 Slingshot Raids) ---------------------------------------------
+
+// Raid eligibility/launch mirrors a SEND exactly (ORBIT garrison, floor(n*fraction)), but the
+// launched ships carry raid=1.
+test("raidSeedlings launches like a send but flags the ships raid=1", () => {
+  const w = mk();
+  const { home, neutral } = homeAndNeutral(w);
+  const before = countOrbiting(w, home.id, 0);
+  const sent = raidSeedlings(w, home.id, neutral.id, 0.5, 0);
+  assert.equal(
+    sent,
+    Math.floor(before * 0.5),
+    "raid launches floor(n*fraction)",
+  );
+  let flagged = 0;
+  for (let i = 0; i < w.seed.count; i++) {
+    if (w.seed.state[i] === STATE.TRANSIT && w.seed.dest[i] === neutral.id) {
+      assert.equal(w.seed.raid[i], 1, "in-transit raider is flagged raid=1");
+      flagged++;
+    }
+  }
+  assert.equal(flagged, sent, "every launched raider is flagged");
+});
+
+test("raidSeedlings no-ops match sendSeedlings (from==to, bad target, fraction 0)", () => {
+  const w = mk();
+  const { home, neutral } = homeAndNeutral(w);
+  assert.equal(raidSeedlings(w, home.id, home.id, 1, 0), 0);
+  assert.equal(raidSeedlings(w, home.id, 99999, 1, 0), 0);
+  assert.equal(raidSeedlings(w, home.id, neutral.id, 0, 0), 0);
+});
+
+// The core contract: a raid SLINGS the final target (does NOT colonize/commit it) and the raiders
+// RETURN HOME, ending in ORBIT re-homed at their origin. A normal send to the same neutral DOES
+// commit (colonizes). Compares the two paths on the same map.
+test("raid slings the target without committing, then returns home (vs send which commits)", () => {
+  // RAID path.
+  const wr = mk();
+  const { home, neutral } = homeAndNeutral(wr);
+  const launched = raidSeedlings(wr, home.id, neutral.id, 1, 0);
+  assert.ok(launched >= 1, "raid launched ships");
+  // The raid must NOT colonize the neutral target at any point.
+  let sawSling = false;
+  for (let i = 0; i < 4000; i++) {
+    Sim.step(wr, 1 / 30);
+    assert.equal(
+      neutral.owner,
+      OWNER_NEUTRAL,
+      "a raid must never colonize/commit its target",
+    );
+    // Some raider enters SLING at the target body during the arc.
+    const s = wr.seed;
+    for (let k = 0; k < s.count; k++)
+      if (s.state[k] === STATE.SLING && s.target[k] === neutral.id)
+        sawSling = true;
+    // Stop once the raiders have returned home (back in ORBIT at the origin, raid cleared).
+    if (countOrbiting(wr, home.id, 0) >= launched) break;
+  }
+  assert.ok(sawSling, "a raider slung the target during the raid");
+  assert.ok(
+    countOrbiting(wr, home.id, 0) >= launched,
+    "raiders returned home and re-orbit the origin",
+  );
+  // raid flags are cleared on the returned ships (no lingering raid=1 at home).
+  for (let i = 0; i < wr.seed.count; i++)
+    if (wr.seed.home[i] === home.id && wr.seed.state[i] === STATE.ORBIT)
+      assert.equal(wr.seed.raid[i], 0, "returned raider's flag is cleared");
+
+  // SEND path on a fresh identical world — the same neutral DOES get colonized.
+  const ws = mk();
+  const ns = ws.asteroids.find(
+    (a) => a.owner === OWNER_NEUTRAL && a.kind === "asteroid" && !a.moon,
+  );
+  const hs = ws.asteroids.find((a) => a.owner === 0);
+  assert.equal(sendSeedlings(ws, hs.id, ns.id, 1, 0) >= 1, true);
+  const committed = stepUntil(ws, () => ns.owner === 0, 4000);
+  assert.notEqual(committed, -1, "a normal send still commits/colonizes");
+});
+
+// A raid bleeds an enemy garrison: arc-fighting the stationed defenders during the sling kills
+// ships over time, WITHOUT the raider committing (the enemy rock is never colonized by the raider).
+test("a raid bleeds the enemy garrison during the sling arc", () => {
+  const w = createWorld({
+    seed: 7,
+    asteroidCount: 16,
+    players: [
+      { id: 0, isAi: false, difficulty: 0 },
+      { id: 1, isAi: false, difficulty: 1 }, // passive opponent to isolate the raid's combat
+    ],
+    width: 1000,
+    height: 1000,
+  });
+  const home0 = w.asteroids.find((a) => a.owner === 0);
+  const home1 = w.asteroids.find((a) => a.owner === 1);
+  const startCount = w.seed.count;
+  const launched = raidSeedlings(w, home0.id, home1.id, 1, 0);
+  assert.ok(launched >= 1, "raid launched at the enemy");
+  // Step through the raid; the enemy rock must never be captured BY the raid (owner 0). It can,
+  // in principle, flip via flipOwnership only if all defenders die — but a raider never STOPS
+  // there (SLING/TRANSIT don't hold the hold-zone), so a pure raid can't flip it to owner 0.
+  for (let i = 0; i < 2500; i++) {
+    Sim.step(w, 1 / 30);
+    assert.notEqual(
+      home1.owner,
+      0,
+      "the raider must not capture the enemy rock (it slings, never commits)",
+    );
+  }
+  assert.ok(
+    w.seed.count < startCount,
+    "combat occurred during the raid (casualties bled the garrison/raiders)",
+  );
 });

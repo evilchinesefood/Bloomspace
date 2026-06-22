@@ -115,10 +115,12 @@ export function updateSeedlings(world, dt) {
       const dy = t.y - s.y[i];
       const d = Math.sqrt(dx * dx + dy * dy);
       if (d <= t.radius + ARRIVE_GAP) {
-        // Reached this waypoint. The FINAL destination resolves (colonize/fight); an
-        // intermediate body is slung around (~70%) before continuing — fighting anything
-        // stationed there during the arc (Combat treats SLING ships as engaging that body).
-        if (t.id === s.dest[i]) resolveArrival(world, i, t);
+        // Reached this waypoint. The FINAL destination resolves (colonize/fight) — UNLESS this
+        // ship is a raider, which slings the dest too (bleeding its garrison during the arc) then
+        // breaks off home instead of committing. An intermediate body is always slung around
+        // (~70%) before continuing — fighting anything stationed there during the arc (Combat
+        // treats SLING ships as engaging that body).
+        if (t.id === s.dest[i] && !s.raid[i]) resolveArrival(world, i, t);
         else enterSling(world, i, t);
         continue;
       }
@@ -226,6 +228,28 @@ function breakOff(world, i, t) {
   const s = world.seed;
   s.slingRem[i] = 0;
   if (t.id === s.dest[i]) {
+    // A raider slung its FINAL target — it does NOT commit. Clear the raid flag and route back
+    // home (its preserved origin); the return trip slings any intermediate hops just like the
+    // outbound leg (existing multi-hop behavior). If home is itself the next hop (adjacent) or
+    // there's no valid hop, reinforce home directly.
+    if (s.raid[i]) {
+      s.raid[i] = 0;
+      const homeId = s.home[i];
+      const homeNode = world.asteroids[homeId];
+      const hop = nextHop(world, t.id, homeId);
+      const node = world.asteroids[hop];
+      if (homeNode && node && hop !== t.id) {
+        s.dest[i] = homeId;
+        s.target[i] = hop;
+        s.state[i] = STATE.TRANSIT;
+        aimAt(world, i, node);
+      } else if (homeNode) {
+        resolveArrival(world, i, homeNode); // already home / no hop → reinforce home
+      } else {
+        resolveArrival(world, i, t); // home vanished → fall back to resolving here
+      }
+      return;
+    }
     resolveArrival(world, i, t);
     return;
   }
@@ -350,4 +374,44 @@ export function sendSeedlings(world, fromId, toId, fraction, owner) {
   return sent;
 }
 
-export default { updateSeedlings, sendSeedlings };
+// raidSeedlings — like sendSeedlings, but the launched ships are RAIDERS: at the final target
+// they sling (arc-fight its garrison) instead of committing, then return home (see breakOff). The
+// launch eligibility is IDENTICAL to sendSeedlings (ORBITing garrison of `owner` at fromId) so a
+// raid behaves exactly like a send at launch time. Returns count actually launched (no-ops on bad
+// args / unreachable / own-home target, same as a send). Sets s.raid=1 only on slots that really
+// launched, so an unreachable target leaves an ORBITing ship un-flagged.
+export function raidSeedlings(world, fromId, toId, fraction, owner) {
+  if (fromId === toId) return 0;
+  const s = world.seed;
+  const target = world.asteroids[toId];
+  if (!target || target.dead) return 0;
+  const f = Math.max(0, Math.min(1, fraction));
+  if (f === 0) return 0;
+
+  const eligible = [];
+  for (let i = 0; i < s.count; i++) {
+    if (
+      s.state[i] === STATE.ORBIT &&
+      s.home[i] === fromId &&
+      s.owner[i] === owner
+    ) {
+      eligible.push(i);
+    }
+  }
+  const n = Math.floor(eligible.length * f);
+  let sent = 0;
+  for (let k = 0; k < n; k++) {
+    const i = eligible[k];
+    if (launchSeedling(world, i, target)) {
+      s.raid[i] = 1; // mark only the slots that really launched
+      sent++;
+    }
+  }
+  if (sent > 0) {
+    const from = world.asteroids[fromId];
+    if (from) pushEvent(world, EVENT.SEND, from.x, from.y, owner);
+  }
+  return sent;
+}
+
+export default { updateSeedlings, sendSeedlings, raidSeedlings };

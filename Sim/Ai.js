@@ -161,6 +161,11 @@ export function effKnobs(player) {
     // difficulty (no KNOB sets it), so existing fixtures don't drift one bit. Personality never
     // flips it (a boolean gate, like attack/plant). Flip a KNOBS[d].retreat to true to enable.
     retreat: !!base.retreat,
+    // Opt-in: issue RAIDs (sling enemy garrisons + return home) instead of committing SENDs when
+    // attacking. DEFAULTS OFF for every shipped difficulty (no KNOB sets it) → the attack path
+    // still queues a plain CMD.SEND, byte-identical to the pre-raid fixtures. Personality never
+    // flips it. Flip a KNOBS[d].raid to true to let that difficulty raid.
+    raid: !!base.raid,
   };
 }
 
@@ -567,8 +572,14 @@ function decide(world, player) {
   if (!target || opportunistic) target = enemy || neutral;
   if (!target) return 0; // no valid target — no-op
 
+  // Raid (opt-in, default OFF — see effKnobs.raid): when raiding is enabled AND this dispatch is an
+  // ATTACK on an enemy-held rock, issue a CMD.RAID (sling the garrison + return home) instead of a
+  // committing CMD.SEND. Expansion to neutral rocks always commits (you can't "raid" empty space).
+  // The default-off path queues CMD.SEND exactly as before, so fixtures stay byte-identical. The
+  // rng draw order is unchanged (this branch consumes no rng).
+  const isAttack = k.raid && enemy && target.id === enemy.id;
   return queueCommand(world, {
-    type: CMD.SEND,
+    type: isAttack ? CMD.RAID : CMD.SEND,
     from: from.id,
     to: target.id,
     fraction: k.fraction,

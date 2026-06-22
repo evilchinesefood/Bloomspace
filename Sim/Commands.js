@@ -5,7 +5,7 @@
 // (AI commands, unpaused human commands) apply immediately and return the mutator's result, keeping
 // the AI per-tick draw order byte-for-byte identical. drainCommands (called at the top of step())
 // applies the staged batch owner-ascending on the next step after resume.
-import { sendSeedlings, setRally } from "./Seedlings.js";
+import { sendSeedlings, raidSeedlings, setRally } from "./Seedlings.js";
 import { tryConnect } from "./MapGen.js";
 import { fireBombard } from "./Bombard.js";
 import { plantTree } from "./Trees.js";
@@ -21,6 +21,7 @@ const HUMAN_OWNER = 0;
 // `c.treeType` so it never collides with this `type` tag.
 export const CMD = {
   SEND: "send",
+  RAID: "raid",
   RALLY: "rally",
   CONNECT: "connect",
   FIRE: "fire",
@@ -45,6 +46,8 @@ export function applyCommand(world, c) {
   switch (c.type) {
     case CMD.SEND:
       return sendSeedlings(world, c.from, c.to, c.fraction, c.owner);
+    case CMD.RAID:
+      return raidSeedlings(world, c.from, c.to, c.fraction, c.owner);
     case CMD.RALLY:
       return setRally(world, c.from, c.to, c.owner);
     case CMD.CONNECT:

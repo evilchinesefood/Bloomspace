@@ -222,7 +222,9 @@ export function createInput({
     picking.updateDrag(e.clientX, e.clientY);
   }
 
-  function dispatch(fromId, toId) {
+  // dispatch — issue a SEND, or a RAID when `raid` is true (held-Shift drag-release). A raid
+  // slings the target instead of committing, then returns home (Sim/Seedlings.raidSeedlings).
+  function dispatch(fromId, toId, raid) {
     const world = getWorld();
     const from = world.asteroids[fromId];
     const to = world.asteroids[toId];
@@ -230,14 +232,15 @@ export function createInput({
     if (from.owner !== HUMAN) return;
     const frac = getSendFraction();
     const sent = queueCommand(world, {
-      type: CMD.SEND,
+      type: raid ? CMD.RAID : CMD.SEND,
       from: fromId,
       to: toId,
       fraction: frac,
       owner: HUMAN,
     });
     // Skip the immediate send-burst FX when the command was staged (world paused).
-    // The Preview ghost is the feedback for staged orders.
+    // The Preview ghost is the feedback for staged orders. A raid launches like a send, so it
+    // gets the same dispatch burst.
     if (sent !== STAGED && sent > 0)
       views.fx.spawnSend(from.x, from.y, ownerColorHex(HUMAN));
   }
@@ -261,8 +264,10 @@ export function createInput({
     const targetId = picking.asteroidAt(e.clientX, e.clientY, world);
 
     if (wasDragging) {
-      // Primary interaction: drag release over a different rock dispatches a send.
-      if (targetId >= 0 && targetId !== downId) dispatch(downId, targetId);
+      // Primary interaction: drag release over a different rock dispatches a send — or a RAID
+      // when Shift is held at release (slings the target + returns home instead of committing).
+      if (targetId >= 0 && targetId !== downId)
+        dispatch(downId, targetId, e.shiftKey);
     }
     // (A pure click selects on the way down; drag is the only dispatch path so an
     //  accidental click never sends. downId===target, or empty, leaves selection as set.)
