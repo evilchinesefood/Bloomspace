@@ -310,6 +310,7 @@ export function createApp(root) {
       centerOn: (x, y) => game && game.centerOn(x, y),
     });
     game.setEventSink(overlay.push);
+    game.setThreatActiveGetter(() => overlay.isThreatActive());
     state = APP_STATE.PLAYING;
   }
 

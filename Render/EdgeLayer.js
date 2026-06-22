@@ -2,15 +2,32 @@
 import * as THREE from "three";
 
 export function createEdgeLayer(scene, opts = {}) {
-  const { color = 0x66ffc8, opacity = 0.6, z = -2.1, getList, getPoint } = opts;
+  const {
+    color = 0x66ffc8,
+    opacity = 0.6,
+    z = -2.1,
+    getList,
+    getPoint,
+    dashed = false,
+    dashSize = 18,
+    gapSize = 12,
+  } = opts;
 
   const geo = new THREE.BufferGeometry();
   let pos = new Float32Array(0);
   let count = -1;
-  const obj = new THREE.LineSegments(
-    geo,
-    new THREE.LineBasicMaterial({ color, transparent: true, opacity }),
-  );
+  // Dashed mode (opt-in) uses LineDashedMaterial — directional "flow" read via an animated
+  // dash offset (dashOffset). Solid mode is byte-identical to before (LineBasicMaterial).
+  const material = dashed
+    ? new THREE.LineDashedMaterial({
+        color,
+        transparent: true,
+        opacity,
+        dashSize,
+        gapSize,
+      })
+    : new THREE.LineBasicMaterial({ color, transparent: true, opacity });
+  const obj = new THREE.LineSegments(geo, material);
   obj.frustumCulled = false;
   scene.add(obj);
 
@@ -43,6 +60,15 @@ export function createEdgeLayer(scene, opts = {}) {
       pos[o + 5] = z;
     }
     if (links.length) geo.attributes.position.needsUpdate = true;
+    // LineDashedMaterial needs per-vertex line distances; recompute after each rebuild only.
+    if (dashed && links.length) geo.computeLineDistances();
+  }
+
+  // Advance the dash offset to read as directional flow. Caller gates on reducedMotion()
+  // (static when reduced). No-op in solid mode. dt in seconds.
+  function animate(dt) {
+    if (!dashed) return;
+    material.dashOffset -= dt * (dashSize + gapSize) * 1.2;
   }
 
   function dispose() {
@@ -51,5 +77,5 @@ export function createEdgeLayer(scene, opts = {}) {
     obj.material.dispose();
   }
 
-  return { object: obj, update, dispose };
+  return { object: obj, update, animate, dispose };
 }

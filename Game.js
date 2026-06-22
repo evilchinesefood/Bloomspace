@@ -8,6 +8,7 @@ import { createScene } from "./Render/Scene.js";
 import { createAsteroidView, sharedTextures } from "./Render/AsteroidView.js";
 import { createSeedlingView } from "./Render/SeedlingView.js";
 import { createTreeView } from "./Render/TreeView.js";
+import { createThreatView } from "./Render/ThreatView.js";
 import { createFx } from "./Render/Fx.js";
 import { createPicking } from "./Render/Picking.js";
 import { createInput } from "./Ui/Input.js";
@@ -72,6 +73,9 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
   const asteroids = createAsteroidView(scene.scene, world, scene, fx);
   const seedlings = createSeedlingView(scene.scene, world, scene);
   const trees = createTreeView(scene.scene, world);
+  // Read-only hold-Q tactical overlay (flow dashes + contest tint). Activated via the getter
+  // seam below (App wires it to overlay.isThreatActive()); inactive = effectively zero cost.
+  const threat = createThreatView(scene.scene, world);
   const picking = createPicking(scene.scene, scene.camera, canvas, world);
   // Non-authoritative audio: starts suspended, unlocks on first user gesture, consumes the
   // same event channel the FX drain reads. Owns no game truth. Defaults enabled; the real
@@ -92,6 +96,9 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
 
   let lastRenderMs = performance.now();
   let eventSink = null;
+  // Parallel to eventSink: a getter App wires to overlay.isThreatActive(). Render reads it
+  // each frame to toggle the read-only ThreatView (hold-Q). Null/false = inactive.
+  let threatActiveGetter = null;
 
   // --- FX polish: cheap, non-authoritative death + flower puffs (render READS sim only).
   let flowerTimer = 0;
@@ -211,6 +218,8 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
     asteroids.update(dt);
     seedlings.update(alpha);
     trees.update();
+    threat.setActive(threatActiveGetter ? threatActiveGetter() : false);
+    threat.update(dt);
     fx.update(dt);
     picking.update();
     // Skip the GL draw while the WebGL context is lost (else composer.render throws every
@@ -221,6 +230,8 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
   function destroy() {
     sound.destroy();
     input.destroy();
+    threat.dispose(); // ThreatView owns its own flow/ring buffers — free them explicitly
+
     // Drop the resize listener the scene registered so matches don't stack handlers.
     if (scene.onWindowResize)
       window.removeEventListener("resize", scene.onWindowResize);
@@ -268,6 +279,10 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
     // Additive event sink: set once by Overlay; called per-event inside the render drain.
     setEventSink: (fn) => {
       eventSink = fn || null;
+    },
+    // Parallel seam (App wires to overlay.isThreatActive()): toggles the hold-Q ThreatView.
+    setThreatActiveGetter: (fn) => {
+      threatActiveGetter = fn || null;
     },
     // Camera/minimap controls: the visible world rect + a pan-to-center action.
     getViewRect: () => scene.getViewRect(),

@@ -41,6 +41,36 @@ export function createOverlay(root, { getViewRect, centerOn }) {
     "position:absolute;inset:0;pointer-events:none;overflow:hidden;";
   root.appendChild(layer);
 
+  // --- Hold-Q threat overlay: dim backdrop + legend (created once, toggled by display). The
+  // scene-side flow dashes + contest tint live in Render/ThreatView.js (activated via the
+  // game.setThreatActiveGetter seam reading isThreatActive). This is pure DOM/UI chrome.
+  let threatActive = false;
+  const dim = document.createElement("div");
+  dim.style.cssText =
+    "position:absolute;inset:0;pointer-events:none;background:rgba(2,4,10,0.42);" +
+    "display:none;";
+  layer.appendChild(dim);
+
+  const legend = document.createElement("div");
+  legend.style.cssText =
+    "position:absolute;top:12px;left:50%;transform:translateX(-50%);" +
+    "pointer-events:none;display:none;font-size:12px;color:#e8eef6;" +
+    "background:rgba(0,0,0,0.6);border:1px solid rgba(120,150,200,0.35);" +
+    "border-radius:6px;padding:8px 12px;line-height:1.5;white-space:nowrap;";
+  legend.innerHTML =
+    '<div style="font-weight:700;margin-bottom:3px;">Threat view</div>' +
+    '<div><span style="color:#9fe;">— —</span> fleets in transit (owner-colored)</div>' +
+    '<div><span style="color:#5dff9b;">●</span> you dominate &nbsp;' +
+    '<span style="color:#ff5a7a;">●</span> outnumbered (inbound pressure)</div>';
+  layer.appendChild(legend);
+
+  function setThreat(on) {
+    if (on === threatActive) return;
+    threatActive = on;
+    dim.style.display = on ? "block" : "none";
+    legend.style.display = on ? "block" : "none";
+  }
+
   // --- Ping pool ---
   const pings = Array.from({ length: PING_POOL }, () => {
     const d = document.createElement("div");
@@ -208,25 +238,39 @@ export function createOverlay(root, { getViewRect, centerOn }) {
     }
   }
 
+  const typing = (e) =>
+    e.target &&
+    e.target.tagName &&
+    /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+
   // Space snap-to: center camera on most recent alert.
   function onKey(e) {
     if (e.code !== "Space") return;
-    if (
-      e.target &&
-      e.target.tagName &&
-      /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)
-    )
-      return;
+    if (typing(e)) return;
     if (snapWx === null) return;
     e.preventDefault();
     centerOn(snapWx, snapWy);
   }
+  // Hold-Q: show the read-only threat overlay (dim + legend here; scene flow/tint in ThreatView).
+  function onThreatDown(e) {
+    if (e.code !== "KeyQ" || e.repeat) return;
+    if (typing(e)) return;
+    setThreat(true);
+  }
+  function onThreatUp(e) {
+    if (e.code !== "KeyQ") return;
+    setThreat(false);
+  }
   window.addEventListener("keydown", onKey, { capture: true });
+  window.addEventListener("keydown", onThreatDown, { capture: true });
+  window.addEventListener("keyup", onThreatUp, { capture: true });
 
   function destroy() {
     window.removeEventListener("keydown", onKey, { capture: true });
+    window.removeEventListener("keydown", onThreatDown, { capture: true });
+    window.removeEventListener("keyup", onThreatUp, { capture: true });
     layer.remove();
   }
 
-  return { push, update, destroy };
+  return { push, update, destroy, isThreatActive: () => threatActive };
 }
