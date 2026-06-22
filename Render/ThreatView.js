@@ -53,7 +53,7 @@ export function createThreatView(scene, world) {
     opacity: 0.5,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
-    vertexColors: false,
+    vertexColors: true,
   });
   const rings = new THREE.InstancedMesh(ringGeo, ringMat, Math.max(1, nBodies));
   rings.instanceColor = new THREE.InstancedBufferAttribute(
