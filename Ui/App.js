@@ -287,6 +287,9 @@ export function createApp(root) {
       isConnectMode: () => (game ? game.input.isConnectMode() : false),
       setFireMode: (on) => game && game.input.setFireMode(on),
       isFireMode: () => (game ? game.input.isFireMode() : false),
+      setRetreatMode: (on) => game && game.input.setRetreatMode(on),
+      isRetreatMode: () => (game ? game.input.isRetreatMode() : false),
+      disarmRetreat: () => (game ? game.input.disarmRetreat() : false),
       toggleInbound: () =>
         game ? game.views.asteroids.toggleInbound() : false,
       isInbound: () => (game ? game.views.asteroids.isInbound() : false),

@@ -25,7 +25,19 @@ export const CMD = {
   CONNECT: "connect",
   FIRE: "fire",
   PLANT: "plant",
+  RETREAT: "retreat",
 };
+
+// applyRetreat — arm/disarm a rock's "retreat if outmatched" + set its fallback body. Only the
+// rock's OWNER may arm its own rock (else no-op). The fallback is validated each tick by
+// updateRetreat, so a junk fallbackId here is harmless ("no retreat"). Returns true on a change.
+function applyRetreat(world, c) {
+  const rock = world.asteroids[c.rock];
+  if (!rock || rock.owner !== c.owner) return false;
+  rock.retreatArmed = !!c.armed;
+  rock.fallbackId = c.fallbackId;
+  return true;
+}
 
 // applyCommand — dispatch ONE intent to its mutator and return the mutator's result verbatim.
 // Unknown type is a defensive no-op (returns undefined).
@@ -41,6 +53,8 @@ export function applyCommand(world, c) {
       return fireBombard(world, c.from, c.to, c.owner);
     case CMD.PLANT:
       return plantTree(world, c.rock, c.treeType, c.owner);
+    case CMD.RETREAT:
+      return applyRetreat(world, c);
     default:
       return undefined;
   }

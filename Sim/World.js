@@ -3,7 +3,7 @@
 import { generateMap } from "./MapGen.js";
 import { updateOrbits } from "./Moons.js";
 import { updateSeedlings, updateRally } from "./Seedlings.js";
-import { resolveCombat } from "./Combat.js";
+import { resolveCombat, updateRetreat } from "./Combat.js";
 import { updateEconomy } from "./Economy.js";
 import { updateTrees } from "./Trees.js";
 import { updateAi, checkVictory, PERSONALITY_NAMES } from "./Ai.js";
@@ -379,6 +379,10 @@ export function step(world, dt) {
   updateSeedlings(world, dt);
   destroyInBlackHoles(world); // any ship inside a black hole's orbit is annihilated
   resolveCombat(world, dt);
+  // Retreat & Regroup: armed rocks outmatched after THIS tick's combat flee to a fallback. Reads
+  // Combat's strAt/totAt buffers (valid only right after resolveCombat), rng-free. retreatArmed
+  // defaults off → no-op → byte-identical to a pre-retreat world.
+  updateRetreat(world);
   updateEconomy(world, dt);
   updateTrees(world, dt);
   updateBombard(world, dt); // advance battery charges / destroy bodies, before victory check

@@ -157,6 +157,10 @@ export function effKnobs(player) {
     aggression: Math.min(1.0, Math.max(0.0, base.aggression * pm.aggrMul)),
     techChance: Math.min(1.0, Math.max(0.0, base.techChance * pm.techMul)),
     techBuffer: Math.max(0, base.techBuffer + pm.bufAdd),
+    // Opt-in: arm "retreat if outmatched" on its frontline rocks. DEFAULTS OFF for every shipped
+    // difficulty (no KNOB sets it), so existing fixtures don't drift one bit. Personality never
+    // flips it (a boolean gate, like attack/plant). Flip a KNOBS[d].retreat to true to enable.
+    retreat: !!base.retreat,
   };
 }
 
@@ -440,6 +444,33 @@ function decide(world, player) {
   for (let i = 0; i < asts.length; i++)
     if (asts[i].owner === id && !asts[i].dead) owned.push(asts[i]);
   if (owned.length === 0) return 0; // wiped — nothing to command
+
+  // Retreat & Regroup (opt-in, default OFF for every shipped difficulty — see effKnobs.retreat):
+  // arm every owned rock to fall back to the strongest owned rock (most energy, lowest-id tiebreak)
+  // if combat outmatches its garrison. Rng-free (queues CMD.RETREAT through the seam; the actual
+  // flee is updateRetreat after combat). The disabled default path is byte-identical (no command).
+  if (k.retreat && owned.length >= 2) {
+    let keep = null;
+    for (const r of owned)
+      if (
+        !keep ||
+        r.energy > keep.energy ||
+        (r.energy === keep.energy && r.id < keep.id)
+      )
+        keep = r;
+    if (keep)
+      for (const r of owned) {
+        if (r.id === keep.id) continue;
+        if (r.retreatArmed && r.fallbackId === keep.id) continue; // already armed there
+        queueCommand(world, {
+          type: CMD.RETREAT,
+          rock: r.id,
+          fallbackId: keep.id,
+          armed: true,
+          owner: id,
+        });
+      }
+  }
 
   // Aggregate ORBIT counts in a SINGLE pass (was a full-SoA rescan per owned rock for the
   // deployable pool, plus another per player-0 rock for bombard targeting). asteroid.id===index,

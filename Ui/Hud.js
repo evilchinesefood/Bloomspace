@@ -731,6 +731,26 @@ export function createHud(root, api) {
     "Set a rally point: click, then pick a target body. Seedlings here (fighters AND defenders) auto-travel there. Click this rock again to clear it.",
   );
 
+  // Retreat & Regroup: arm this rock to flee its garrison to a fallback rock if combat outmatches
+  // it. Clicking the button when DISARMED arms the one-click fallback-pick; when ARMED it disarms
+  // in place (keeping the fallback so re-arming is one click). Mirrors the rally toggle.
+  const retreatBtn = el("wa-button", {
+    size: "small",
+    style: "width:100%;margin-bottom:.4rem;",
+    html: '<i slot="start" class="fa-solid fa-person-running"></i>Retreat if outmatched',
+  });
+  retreatBtn.addEventListener("click", () => {
+    const id = api.getSelected();
+    const a = id != null && id >= 0 ? api.getWorld().asteroids[id] : null;
+    if (api.isRetreatMode()) api.setRetreatMode(false);
+    else if (a && a.retreatArmed) api.disarmRetreat();
+    else api.setRetreatMode(true);
+  });
+  retreatBtn._tip = tip(
+    retreatBtn,
+    "Arm 'retreat if outmatched': click, then pick another body you own as the fallback. If this rock is losing the fight after combat, its garrison flees there. Click again to disarm.",
+  );
+
   // Manual connection: build a permanent travel link to another body you control (costs
   // energy from this rock). Arms a one-click pick like the rally.
   const connectBtn = el("wa-button", {
@@ -781,6 +801,7 @@ export function createHud(root, api) {
     clearTreesBtn,
     fireBtn,
     rallyBtn,
+    retreatBtn,
     connectBtn,
     inboundBtn,
     hint,
@@ -794,6 +815,7 @@ export function createHud(root, api) {
     clearTreesBtn._tip,
     fireBtn._tip,
     rallyBtn._tip,
+    retreatBtn._tip,
     connectBtn._tip,
     inboundBtn._tip,
   );
@@ -915,6 +937,7 @@ export function createHud(root, api) {
       owned && a.trees && a.trees.length > 0 ? "" : "none";
     fireBtn.style.display = "none"; // shown below only when owned + armed + not charging
     rallyBtn.style.display = owned ? "" : "none";
+    retreatBtn.style.display = owned ? "" : "none";
     connectBtn.style.display = owned ? "" : "none";
     hint.style.display = owned ? "" : "none";
     if (owned) {
@@ -998,6 +1021,24 @@ export function createHud(root, api) {
             ? `<i slot="start" class="fa-solid fa-location-crosshairs"></i>Rally → #${a.rally} (change)`
             : '<i slot="start" class="fa-solid fa-location-crosshairs"></i>Set Rally Point',
       );
+      // Retreat button: "brand" while picking a fallback, else reflect the armed state (label
+      // shows the fallback id when armed). picking → cancel; armed → disarm; idle → arm + pick.
+      const retreatPicking = api.isRetreatMode && api.isRetreatMode();
+      const retreatArmed = !!a.retreatArmed;
+      setProp(
+        retreatBtn,
+        "variant",
+        retreatPicking || retreatArmed ? "brand" : "neutral",
+      );
+      setHtml(
+        retreatBtn,
+        retreatPicking
+          ? '<i slot="start" class="fa-solid fa-xmark"></i>Cancel fallback pick'
+          : retreatArmed
+            ? `<i slot="start" class="fa-solid fa-person-running"></i>Retreat → #${a.fallbackId} (disarm)`
+            : '<i slot="start" class="fa-solid fa-person-running"></i>Retreat if outmatched',
+      );
+
       const connecting = api.isConnectMode && api.isConnectMode();
       setProp(connectBtn, "variant", connecting ? "brand" : "neutral");
       setProp(
@@ -1021,9 +1062,11 @@ export function createHud(root, api) {
         ? "Click any body to bombard it — Esc to cancel."
         : arming
           ? "Click a target asteroid to set the rally (click this rock to clear)."
-          : connecting
-            ? "Click another body you control to build a permanent link."
-            : "Drag from this asteroid to a target to send seedlings.";
+          : retreatPicking
+            ? "Click another body you control as the fallback — Esc to cancel."
+            : connecting
+              ? "Click another body you control to build a permanent link."
+              : "Drag from this asteroid to a target to send seedlings.";
     }
 
     // Inbound-rally toggle works for ANY selected body (e.g. inspect which of your rocks

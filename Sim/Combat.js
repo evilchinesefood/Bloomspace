@@ -14,6 +14,7 @@ import {
   pushEvent,
 } from "./World.js";
 import { ownerStrengthMult } from "./Tech.js";
+import { launchSeedling } from "./Seedlings.js";
 
 export const CONTACT_RADIUS = 14; // world units; enemies this close trade damage
 export const COMBAT_RATE = 0.1; // damage/sec scalar: energy -= enemyStrength*RATE*dt
@@ -217,6 +218,50 @@ export function resolveCombat(world, dt) {
   flipOwnership(world);
 }
 
+// Retreat outmatched threshold. A rock retreats when enemy orbiting strength STRICTLY exceeds
+// its own by this factor — 1.0 = "more enemy strength than mine" with no extra margin (the
+// brief's default). Bump above 1 to demand a clearer overmatch before bugging out.
+export const RETREAT_FACTOR = 1.0;
+
+// updateRetreat — DETERMINISTIC, RNG-FREE post-combat pass. Reads the module strAt/totAt buffers
+// populated by resolveCombat THIS tick (valid only immediately after it runs), so it must be
+// called right after resolveCombat in step(). For each armed+owned+living rock with a valid owned
+// fallback, if its stationed garrison is outmatched (enemy strength > own × RETREAT_FACTOR) it
+// launches every garrison seedling stationed at the rock toward the fallback via launchSeedling
+// (rng-free). A "stationed" ship is ORBIT or COMBAT (NOT TRANSIT/SLING — those are in flight): an
+// outmatched garrison is precisely the one resolveCombat just tinted COMBAT, so scanning only
+// ORBIT would miss the exact ships we want to save. retreatArmed defaults falsy → no rock retreats
+// → the pass is a no-op → byte-identical to before. Iterates rocks in index order; mirrors
+// updateRally's "scan SoA + launchSeedling" discipline.
+export function updateRetreat(world) {
+  const asts = world.asteroids;
+  const s = world.seed;
+  for (let a = 0; a < asts.length; a++) {
+    const rock = asts[a];
+    if (!rock.retreatArmed || rock.owner < 0 || rock.dead) continue;
+    const fb = asts[rock.fallbackId];
+    // Re-validate the fallback EVERY tick: must exist, be alive, owned by the same player, and
+    // not be the rock itself. A stale/junk fallbackId just means "no retreat" (safe).
+    if (!fb || fb.dead || fb.owner !== rock.owner || fb.id === rock.id)
+      continue;
+    if (a >= totAt.length) continue; // rock beyond this tick's combat buffers — nothing to read
+    const own = strAt[a * MAXO + rock.owner];
+    const enemy = totAt[a] - own;
+    if (enemy <= own * RETREAT_FACTOR) continue; // not outmatched — hold position
+    // Outmatched: send the whole stationed garrison (ORBIT + COMBAT) to the fallback, in index
+    // order. launchSeedling reads s.home[i] (unchanged by the COMBAT tint), so a fighting ship
+    // routes home→fallback correctly.
+    for (let i = 0; i < s.count; i++) {
+      if (
+        (s.state[i] === STATE.ORBIT || s.state[i] === STATE.COMBAT) &&
+        s.home[i] === rock.id &&
+        s.owner[i] === rock.owner
+      )
+        launchSeedling(world, i, fb);
+    }
+  }
+}
+
 // flipOwnership — "last side holding it owns it". For each owned asteroid, look at living
 // seedlings inside its hold-zone (radius + HOLD_GAP). If the current owner has zero there
 // and exactly one rival side is present, the rock flips to that rival. Contested (owner
@@ -277,4 +322,11 @@ function flipOwnership(world) {
   }
 }
 
-export default { resolveCombat, CONTACT_RADIUS, COMBAT_RATE, HOLD_GAP };
+export default {
+  resolveCombat,
+  updateRetreat,
+  CONTACT_RADIUS,
+  COMBAT_RATE,
+  HOLD_GAP,
+  RETREAT_FACTOR,
+};

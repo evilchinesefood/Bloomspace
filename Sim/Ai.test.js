@@ -529,3 +529,53 @@ test("bombard gate: a Normal superweapon-fiend AI never builds a battery in a fu
     "a Normal AI must never plant a bombard tree (bombardment is Brutal-only)",
   );
 });
+
+// --- Retreat knob is reachable but DEFAULT-OFF for every shipped difficulty -------------------
+
+test("retreat knob: present in effKnobs but OFF for every difficulty/personality (no drift)", () => {
+  // The retreat AI knob must be exposed (reachable) yet effectively OFF for every shipped
+  // difficulty AND personality, so no existing Ai.test fixture drifts and every parity run stays
+  // byte-identical. (Enabling it is a one-line KNOBS edit; the on-path is exercised in
+  // Retreat.test.js via the SIM directly.)
+  for (const diff of [0, 1, 2, 3]) {
+    for (const p of [
+      "neutral",
+      "rusher",
+      "turtle",
+      "expander",
+      "superweapon-fiend",
+    ]) {
+      const k = effKnobs({ difficulty: diff, personality: p });
+      assert.equal(
+        "retreat" in k,
+        true,
+        `retreat knob present at diff ${diff}`,
+      );
+      assert.equal(
+        k.retreat,
+        false,
+        `retreat must default OFF at difficulty ${diff} / ${p}`,
+      );
+    }
+  }
+});
+
+test("retreat knob OFF ⇒ AI never arms a rock for retreat over a full game (no drift)", () => {
+  // End-to-end: with the knob off (every shipped difficulty), no AI rock ever gets retreatArmed,
+  // so the post-combat retreat pass stays a no-op and the run is byte-identical to pre-feature.
+  const w = createWorld({
+    seed: 909,
+    asteroidCount: 16,
+    players: [
+      { id: 0, isAi: false, difficulty: 0 },
+      { id: 1, isAi: true, difficulty: 3 }, // Brutal — the most active controller
+    ],
+  });
+  for (let t = 0; t < 2000; t++) Sim.step(w, 1 / 30);
+  const anyArmed = w.asteroids.some((a) => a.retreatArmed);
+  assert.equal(
+    anyArmed,
+    false,
+    "no rock should be armed for retreat by default",
+  );
+});

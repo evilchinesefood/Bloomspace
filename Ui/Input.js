@@ -31,6 +31,7 @@ export function createInput({
   let rallyMode = false; // armed: next click sets the selected rock's rally point
   let connectMode = false; // armed: next click links the selected rock to another owned body
   let fireMode = false; // armed: next click on ANY body fires the selected battery at it
+  let retreatMode = false; // armed: next click on an owned rock sets the selected rock's fallback
   const activeTouches = new Set(); // live touch pointers — 2+ means a camera gesture, not select
 
   function selectedId() {
@@ -38,24 +39,31 @@ export function createInput({
   }
   function setRallyMode(on) {
     rallyMode = !!on;
-    if (rallyMode) connectMode = fireMode = false; // arm-modes are mutually exclusive
+    if (rallyMode) connectMode = fireMode = retreatMode = false; // arm-modes are mutually exclusive
   }
   function isRallyMode() {
     return rallyMode;
   }
   function setConnectMode(on) {
     connectMode = !!on;
-    if (connectMode) rallyMode = fireMode = false;
+    if (connectMode) rallyMode = fireMode = retreatMode = false;
   }
   function isConnectMode() {
     return connectMode;
   }
   function setFireMode(on) {
     fireMode = !!on;
-    if (fireMode) rallyMode = connectMode = false;
+    if (fireMode) rallyMode = connectMode = retreatMode = false;
   }
   function isFireMode() {
     return fireMode;
+  }
+  function setRetreatMode(on) {
+    retreatMode = !!on;
+    if (retreatMode) rallyMode = connectMode = fireMode = false;
+  }
+  function isRetreatMode() {
+    return retreatMode;
   }
 
   function select(id) {
@@ -153,6 +161,30 @@ export function createInput({
         owner: HUMAN,
       });
       fireMode = false;
+      return;
+    }
+
+    // Retreat fallback-pick mode: a single click on ANOTHER owned rock arms the selected rock to
+    // flee there if outmatched after combat. Clicking the selected rock itself, or an empty miss,
+    // keeps it armed (mirrors rally's no-silent-wipe footgun guard).
+    if (retreatMode) {
+      const src = selectedId();
+      const srcRock = src >= 0 ? world.asteroids[src] : null;
+      if (!srcRock || srcRock.owner !== HUMAN) {
+        retreatMode = false; // nothing of ours selected — disarm
+        return;
+      }
+      if (clicked < 0) return; // missed a body — keep armed, try again
+      const dest = world.asteroids[clicked];
+      if (clicked === src || !dest || dest.owner !== HUMAN) return; // need a DIFFERENT owned rock
+      queueCommand(world, {
+        type: CMD.RETREAT,
+        rock: src,
+        fallbackId: clicked,
+        armed: true,
+        owner: HUMAN,
+      });
+      retreatMode = false;
       return;
     }
 
@@ -276,12 +308,30 @@ export function createInput({
     return clearTreesSim(world, id, HUMAN) > 0;
   }
 
-  // Escape cancels an armed rally / connect pick (the banner tells the player this is there).
+  // Disarm "retreat if outmatched" on the selected owned rock, keeping its fallbackId so the
+  // player can re-arm with one click. Arming is the fallback-pick gesture (setRetreatMode); this is
+  // the explicit "turn it off" path. Routed through the seam (owner guard inside applyRetreat).
+  function disarmRetreat() {
+    const world = getWorld();
+    const id = selectedId();
+    const rock = id >= 0 && world ? world.asteroids[id] : null;
+    if (!rock || rock.owner !== HUMAN) return false;
+    return queueCommand(world, {
+      type: CMD.RETREAT,
+      rock: id,
+      fallbackId: rock.fallbackId,
+      armed: false,
+      owner: HUMAN,
+    });
+  }
+
+  // Escape cancels an armed rally / connect / fire / retreat pick (the banner tells the player so).
   function onKey(e) {
     if (e.key === "Escape") {
       rallyMode = false;
       connectMode = false;
       fireMode = false;
+      retreatMode = false;
     }
   }
 
@@ -312,6 +362,9 @@ export function createInput({
     isConnectMode,
     setFireMode,
     isFireMode,
+    setRetreatMode,
+    isRetreatMode,
+    disarmRetreat,
     destroy,
   };
 }
