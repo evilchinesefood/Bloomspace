@@ -7,10 +7,14 @@ import {
   TECH_COST,
   techCost,
   buyTech,
+  chooseCrossroads,
+  CROSSROADS,
   ownerStrengthMult,
   ownerSpeedMult,
   ownerRegenMult,
+  ownerSlingMult,
 } from "./Tech.js";
+import { serialize, deserialize } from "./Save.js";
 import { resolveCombat } from "./Combat.js";
 import { updateEconomy } from "./Economy.js";
 import { updateSeedlings } from "./Seedlings.js";
@@ -374,4 +378,210 @@ test("Easy AI never buys tech (same gate as planting)", () => {
     0,
     "Easy AI buys no tech",
   );
+});
+
+// --- 7. Tech Crossroads (#8): tier-3 capstone fork --------------------------
+
+function maxTrack(w, track) {
+  w.players[0].seeds = 1000;
+  for (let i = 0; i < MAX_TIER; i++) buyTech(w, 0, track);
+}
+
+test("chooseCrossroads: rejected below MAX_TIER — false, no mutation", () => {
+  const w = world();
+  w.players[0].seeds = 1000;
+  buyTech(w, 0, TECH.STRENGTH); // level 1, not maxed
+  assert.equal(chooseCrossroads(w, 0, TECH.STRENGTH, "overwhelm"), false);
+  assert.equal(w.players[0].crossroads, undefined, "no crossroads written");
+});
+
+test("chooseCrossroads: rejected for an invalid choiceId at MAX_TIER", () => {
+  const w = world();
+  maxTrack(w, TECH.STRENGTH);
+  assert.equal(chooseCrossroads(w, 0, TECH.STRENGTH, "bogus"), false);
+  assert.equal(chooseCrossroads(w, 0, TECH.STRENGTH, "blitz"), false); // wrong track's id
+  assert.ok(
+    !w.players[0].crossroads || !w.players[0].crossroads.strength,
+    "no capstone set for an invalid id",
+  );
+});
+
+test("chooseCrossroads: accepted at MAX_TIER with a valid id; unknown player → false", () => {
+  const w = world();
+  maxTrack(w, TECH.STRENGTH);
+  assert.equal(chooseCrossroads(w, 99, TECH.STRENGTH, "overwhelm"), false);
+  assert.equal(chooseCrossroads(w, 0, TECH.STRENGTH, "overwhelm"), true);
+  assert.equal(w.players[0].crossroads.strength, "overwhelm");
+});
+
+test("capstone effects: each capstone folds into the right accessor", () => {
+  // overwhelm → ownerStrengthMult ×1.2 (on top of L3 strength 1.45).
+  const a = world();
+  maxTrack(a, TECH.STRENGTH);
+  const base = ownerStrengthMult(a, 0);
+  assert.equal(chooseCrossroads(a, 0, TECH.STRENGTH, "overwhelm"), true);
+  assert.ok(
+    Math.abs(ownerStrengthMult(a, 0) - base * 1.2) < 1e-9,
+    "overwhelm ×1.2 strength",
+  );
+  assert.equal(ownerSlingMult(a, 0), 1, "no sling capstone → sling 1.0");
+
+  // reaver → ownerSlingMult ×1.5 (strength accessor unchanged from base).
+  const b = world();
+  maxTrack(b, TECH.STRENGTH);
+  const bStr = ownerStrengthMult(b, 0);
+  assert.equal(chooseCrossroads(b, 0, TECH.STRENGTH, "reaver"), true);
+  assert.ok(Math.abs(ownerSlingMult(b, 0) - 1.5) < 1e-9, "reaver ×1.5 sling");
+  assert.ok(
+    Math.abs(ownerStrengthMult(b, 0) - bStr) < 1e-9,
+    "reaver leaves strength mult alone",
+  );
+
+  // blitz → speed ×1.2 ; slipstream → sling ×1.3
+  const c = world();
+  maxTrack(c, TECH.SPEED);
+  const cSpd = ownerSpeedMult(c, 0);
+  chooseCrossroads(c, 0, TECH.SPEED, "blitz");
+  assert.ok(
+    Math.abs(ownerSpeedMult(c, 0) - cSpd * 1.2) < 1e-9,
+    "blitz ×1.2 speed",
+  );
+  const d = world();
+  maxTrack(d, TECH.SPEED);
+  chooseCrossroads(d, 0, TECH.SPEED, "slipstream");
+  assert.ok(
+    Math.abs(ownerSlingMult(d, 0) - 1.3) < 1e-9,
+    "slipstream ×1.3 sling",
+  );
+
+  // bloom → regen ×1.3 ; fortify → strength ×1.15
+  const e = world();
+  maxTrack(e, TECH.REGEN);
+  const eReg = ownerRegenMult(e, 0);
+  chooseCrossroads(e, 0, TECH.REGEN, "bloom");
+  assert.ok(
+    Math.abs(ownerRegenMult(e, 0) - eReg * 1.3) < 1e-9,
+    "bloom ×1.3 regen",
+  );
+  const f = world();
+  maxTrack(f, TECH.REGEN);
+  const fStr = ownerStrengthMult(f, 0);
+  chooseCrossroads(f, 0, TECH.REGEN, "fortify");
+  assert.ok(
+    Math.abs(ownerStrengthMult(f, 0) - fStr * 1.15) < 1e-9,
+    "fortify ×1.15 strength (cross-track lever)",
+  );
+});
+
+test("no capstone chosen: every accessor returns its pre-capstone value", () => {
+  // Max all three tracks but pick NO capstone → accessors equal the plain L3 mults; sling = 1.
+  const w = world();
+  w.players[0].seeds = 1000;
+  for (const tr of [TECH.STRENGTH, TECH.SPEED, TECH.REGEN])
+    for (let i = 0; i < MAX_TIER; i++) buyTech(w, 0, tr);
+  assert.ok(Math.abs(ownerStrengthMult(w, 0) - 1.45) < 1e-9);
+  assert.ok(Math.abs(ownerSpeedMult(w, 0) - 1.36) < 1e-9);
+  assert.ok(Math.abs(ownerRegenMult(w, 0) - 1.6) < 1e-9);
+  assert.equal(ownerSlingMult(w, 0), 1, "sling default 1.0 with no capstone");
+  assert.equal(w.players[0].crossroads, undefined, "no crossroads object");
+});
+
+test("combat: a reaver SLING ship deals MORE damage; a non-SLING reaver ship does not", () => {
+  // One owner-0 attacker vs one owner-1 victim, within CONTACT_RADIUS, both stationed on the
+  // same body so the same-body pass (the buffed line) governs damage. Compare baseline vs the
+  // attacker SLING-state with reaver: only the SLING case should hit harder.
+  // Both cases max owner-0 STRENGTH (the prereq to pick reaver) so the strength-tech factor is
+  // CONSTANT across the comparison — the ONLY difference is whether reaver is chosen. That
+  // isolates the sling capstone from the strength-tech buff.
+  function setup(slingAttacker, reaver) {
+    const w = world(3, [
+      { id: 0, isAi: false, difficulty: 0 },
+      { id: 1, isAi: false, difficulty: 0 },
+    ]);
+    const s = w.seed;
+    s.count = 0;
+    const mk = (owner, x, state, home, target) => {
+      const i = s.count++;
+      s.owner[i] = owner;
+      s.x[i] = x;
+      s.y[i] = 0;
+      s.px[i] = x;
+      s.py[i] = 0;
+      s.home[i] = home;
+      s.target[i] = target;
+      s.dest[i] = target;
+      s.state[i] = state;
+      s.strength[i] = 50;
+      s.energy[i] = 100;
+      s.kind[i] = 0;
+      s.orbitRadius[i] = 80;
+      s.orbitAngle[i] = 0;
+      s.slingRem[i] = 0;
+      return i;
+    };
+    // attacker (owner 0) stationed/slinging at body 0; victim (owner 1) stationed at body 0.
+    mk(
+      0,
+      0,
+      slingAttacker ? STATE.SLING : STATE.ORBIT,
+      0,
+      slingAttacker ? 0 : -1,
+    );
+    mk(1, 5, STATE.ORBIT, 0, -1);
+    // Max STRENGTH in BOTH variants (constant strength factor); reaver toggles the sling capstone.
+    w.players[0].seeds = 1000;
+    for (let i = 0; i < MAX_TIER; i++) buyTech(w, 0, TECH.STRENGTH);
+    if (reaver) chooseCrossroads(w, 0, TECH.STRENGTH, "reaver");
+    return w;
+  }
+  // SLING attacker, no reaver → baseline damage to the victim.
+  const baseW = setup(true, false);
+  resolveCombat(baseW, DT);
+  const baseVictim = baseW.seed.energy[1];
+  // SLING attacker WITH reaver → victim takes more damage.
+  const reaverW = setup(true, true);
+  resolveCombat(reaverW, DT);
+  assert.ok(
+    reaverW.seed.energy[1] < baseVictim - 1e-9,
+    `reaver SLING ship hits harder: ${reaverW.seed.energy[1]} < ${baseVictim}`,
+  );
+  // ORBIT (non-SLING) attacker WITH reaver → NO sling bonus, identical to a non-reaver ORBIT case
+  // (same strength tech in both). Confirms the sling factor only touches SLING-state ships.
+  const orbitReaver = setup(false, true);
+  const orbitBase = setup(false, false);
+  resolveCombat(orbitReaver, DT);
+  resolveCombat(orbitBase, DT);
+  assert.ok(
+    Math.abs(orbitReaver.seed.energy[1] - orbitBase.seed.energy[1]) < 1e-9,
+    "reaver does NOT buff a non-SLING ship",
+  );
+});
+
+test("save round-trip: a player's crossroads survives serialize→deserialize", () => {
+  const w = world();
+  maxTrack(w, TECH.STRENGTH);
+  chooseCrossroads(w, 0, TECH.STRENGTH, "overwhelm");
+  const round = deserialize(JSON.parse(JSON.stringify(serialize(w))));
+  assert.deepEqual(
+    round.players[0].crossroads,
+    { strength: "overwhelm" },
+    "crossroads cloned whole through Save",
+  );
+  // And the accessor reflects the restored capstone.
+  assert.ok(
+    Math.abs(ownerStrengthMult(round, 0) - 1.45 * 1.2) < 1e-9,
+    "restored capstone still buffs the accessor",
+  );
+});
+
+test("CROSSROADS data: each track offers exactly two capstones with a lever+factor", () => {
+  for (const track of [TECH.STRENGTH, TECH.SPEED, TECH.REGEN]) {
+    const opts = CROSSROADS[track];
+    assert.equal(opts.length, 2, `${track} has two capstones`);
+    for (const o of opts) {
+      assert.ok(typeof o.id === "string" && o.id.length > 0);
+      assert.ok(["strength", "speed", "regen", "sling"].includes(o.lever));
+      assert.ok(o.factor > 1, "a capstone is a positive bonus");
+    }
+  }
 });

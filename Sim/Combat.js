@@ -13,7 +13,7 @@ import {
   EVENT,
   pushEvent,
 } from "./World.js";
-import { ownerStrengthMult } from "./Tech.js";
+import { ownerStrengthMult, ownerSlingMult } from "./Tech.js";
 import { launchSeedling } from "./Seedlings.js";
 
 export const CONTACT_RADIUS = 14; // world units; enemies this close trade damage
@@ -52,6 +52,9 @@ let totAt = new Float32Array(0); // [asteroid] -> total orbiting strength
 // Per-owner strength-tech multiplier, recomputed once per tick (indexed by owner id
 // 0..MAXO-1). A constant per-owner factor keeps both damage passes order-independent.
 let strMult = new Float32Array(0);
+// Per-owner SLING-damage capstone multiplier (1.0 = no relevant capstone). Applied ONLY to
+// SLING-state ships below; defaults 1 → byte-identical with no capstone chosen.
+let slingMult = new Float32Array(0);
 function ensureHomeBufs(seedCap, astCount) {
   if (MAXO === 0) MAXO = MAX_PLAYERS;
   if (engaged.length < seedCap)
@@ -59,11 +62,16 @@ function ensureHomeBufs(seedCap, astCount) {
   if (strAt.length < astCount * MAXO) strAt = new Float32Array(astCount * MAXO);
   if (totAt.length < astCount) totAt = new Float32Array(astCount);
   if (strMult.length < MAXO) strMult = new Float32Array(MAXO);
+  if (slingMult.length < MAXO) slingMult = new Float32Array(MAXO);
 }
 
-// Fill strMult[0..MAXO-1] with each owner's strength-tech multiplier (1.0 = no tech).
+// Fill strMult/slingMult[0..MAXO-1] with each owner's strength-tech multiplier (1.0 = no tech)
+// and SLING-damage capstone multiplier (1.0 = no relevant capstone).
 function loadStrMult(world) {
-  for (let o = 0; o < MAXO; o++) strMult[o] = ownerStrengthMult(world, o);
+  for (let o = 0; o < MAXO; o++) {
+    strMult[o] = ownerStrengthMult(world, o);
+    slingMult[o] = ownerSlingMult(world, o);
+  }
 }
 
 // Pack two 16-bit-ish cell coords into one key. Offset keeps negatives non-negative.
@@ -161,8 +169,13 @@ export function resolveCombat(world, dt) {
     // with the attacker's tech, and the pass stays order-independent (constant per-owner). The
     // symbiosis aura of the rock the ship is stationed on (h) buffs its garrison strength too
     // (factor 1 with no adjacent symbiosis → byte-identical). h is already validated 0..A here.
+    // A SLING-state ship (mid-slingshot, counted "on" its target body) also gets its owner's
+    // sling-damage capstone bonus; non-SLING ships use factor 1 (default capstone-free = 1 too).
     const buffed =
-      s.strength[i] * strMult[o] * (world.asteroids[h].symAura || 1);
+      s.strength[i] *
+      strMult[o] *
+      (world.asteroids[h].symAura || 1) *
+      (s.state[i] === STATE.SLING ? slingMult[o] : 1);
     strAt[h * MAXO + o] += buffed;
     totAt[h] += buffed;
   }

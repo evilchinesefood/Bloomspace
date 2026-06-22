@@ -279,6 +279,8 @@ export function createApp(root) {
       onPlant: (type) => game && game.plant(type),
       onUpgrade: (stat) => (game ? game.upgrade(stat) : false),
       onBuyTech: (track) => (game ? game.buyTech(track) : false),
+      onChooseCrossroads: (track, id) =>
+        game ? game.chooseCrossroads(track, id) : false,
       onClearTrees: () => (game ? game.clearTrees() : false),
       getSelected: () => (game ? game.input.selectedId() : -1),
       setRallyMode: (on) => game && game.input.setRallyMode(on),

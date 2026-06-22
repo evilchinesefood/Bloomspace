@@ -17,7 +17,7 @@ import {
 } from "../Sim/Bombard.js";
 import { CONNECT_ENERGY_COST } from "../Sim/MapGen.js";
 import { KIND } from "../Sim/World.js";
-import { TECH, MAX_TIER, techCost } from "../Sim/Tech.js";
+import { TECH, MAX_TIER, techCost, CROSSROADS } from "../Sim/Tech.js";
 import {
   UPGRADE,
   upgradeCost,
@@ -79,6 +79,10 @@ function playerSeeds(world, id) {
 function playerTechLevel(world, id, track) {
   const p = playerById(world, id);
   return p && p.tech ? p.tech[track] | 0 : 0;
+}
+function playerCrossroad(world, id, track) {
+  const p = playerById(world, id);
+  return p && p.crossroads ? p.crossroads[track] : null;
 }
 // Tier dots like ●●○ for a level out of MAX_TIER.
 function tierDots(level) {
@@ -197,6 +201,15 @@ export function createHud(root, api) {
       color: "#ffd24b",
     },
   ];
+  // Short labels for the tier-3 capstone fork (ids come from Sim/Tech.CROSSROADS).
+  const CAPSTONE_LABEL = {
+    overwhelm: "Overwhelm",
+    reaver: "Reaver",
+    blitz: "Blitz",
+    slipstream: "Slipstream",
+    bloom: "Bloom",
+    fortify: "Fortify",
+  };
   const techPop = el("wa-popover", {
     for: "BsTechBtn",
     placement: "bottom-end",
@@ -249,7 +262,30 @@ export function createHud(root, api) {
         buyBtn,
       ],
     );
-    return { def, row, dots, cost, buyBtn };
+    // Tier-3 capstone fork: two buttons that appear only when this track is maxed. The chosen
+    // capstone highlights (variant brand); clicking routes through api.onChooseCrossroads.
+    const capBtns = (CROSSROADS[def.track] || []).map((opt) => {
+      const b = el("wa-button", {
+        size: "small",
+        style: "flex:1;font-size:.72rem;",
+        textContent: CAPSTONE_LABEL[opt.id] || opt.id,
+      });
+      b.addEventListener(
+        "click",
+        () =>
+          api.onChooseCrossroads && api.onChooseCrossroads(def.track, opt.id),
+      );
+      return { opt, btn: b };
+    });
+    const fork = el(
+      "div",
+      {
+        style:
+          "display:none;gap:.4rem;margin:-.25rem 0 .55rem 1.6rem;align-items:center;",
+      },
+      capBtns.map((c) => c.btn),
+    );
+    return { def, row, dots, cost, buyBtn, fork, capBtns };
   });
   techPop.append(
     el("div", { style: "min-width:240px;font:500 .85rem system-ui;" }, [
@@ -258,7 +294,7 @@ export function createHud(root, api) {
         textContent: "Tech",
       }),
       techSeedsEl,
-      ...techRows.map((r) => r.row),
+      ...techRows.flatMap((r) => [r.row, r.fork]),
       el("div", {
         style: "opacity:.8;font-size:.72rem;line-height:1.3;margin-top:.2rem;",
         textContent:
@@ -287,6 +323,16 @@ export function createHud(root, api) {
         : affordable
           ? `Buy tier ${level + 1} for ${cost} seeds`
           : `Need ${cost} seeds`;
+      // Capstone fork: reveal at MAX_TIER and highlight the chosen capstone (variant brand).
+      const display = maxed ? "flex" : "none";
+      if (r.fork.style.display !== display) r.fork.style.display = display;
+      if (maxed) {
+        const chosen = playerCrossroad(world, HUMAN, r.def.track);
+        for (const c of r.capBtns) {
+          const picked = chosen === c.opt.id;
+          setProp(c.btn, "variant", picked ? "brand" : "neutral");
+        }
+      }
     }
   }
 

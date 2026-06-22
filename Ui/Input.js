@@ -8,7 +8,7 @@
 import { clearTrees as clearTreesSim } from "../Sim/Trees.js";
 import { isArmed } from "../Sim/Bombard.js";
 import { queueCommand, CMD, STAGED } from "../Sim/Commands.js";
-import { buyTech } from "../Sim/Tech.js";
+import { buyTech, chooseCrossroads } from "../Sim/Tech.js";
 import { buyUpgrade } from "../Sim/Upgrade.js";
 import { ownerColorHex } from "../Render/Palette.js";
 import { WORLD_STATUS } from "../Sim/World.js";
@@ -296,6 +296,15 @@ export function createInput({
     return buyTech(world, HUMAN, track);
   }
 
+  // Capstone-pick action for the HUD's tech panel (player 0). Validity (track at MAX_TIER + a
+  // real capstone id) is enforced inside chooseCrossroads; this only routes the human's intent
+  // through the sanctioned call (mirrors tech()). Returns true if a capstone was set.
+  function crossroads(track, id) {
+    const world = getWorld();
+    if (!world) return false;
+    return chooseCrossroads(world, HUMAN, track, id);
+  }
+
   // Upgrade action for the HUD's per-rock upgrade panel. Validates inside buyUpgrade.
   function upgrade(stat) {
     const world = getWorld();
@@ -358,6 +367,7 @@ export function createInput({
   return {
     plant,
     tech,
+    crossroads,
     upgrade,
     clearTrees,
     selectedId,

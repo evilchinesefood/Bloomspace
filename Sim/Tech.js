@@ -16,6 +16,27 @@ export const TECH = { STRENGTH: "strength", SPEED: "speed", REGEN: "regen" };
 export const TECH_TRACKS = [TECH.STRENGTH, TECH.SPEED, TECH.REGEN];
 export const MAX_TIER = 3;
 
+// Tier-3 capstone FORK. When a track hits MAX_TIER the player picks ONE of its two capstones,
+// stored on player.crossroads[track] = capstoneId (plain object, absent/empty by default → it
+// auto-clones in Save and contributes nothing, so every multiplier stays its pre-capstone value
+// and the sim is byte-identical). Each capstone names a `lever` (which owner-mult it boosts) and a
+// multiplicative `factor`. levers: "strength"|"speed"|"regen" fold into the matching ownerXMult;
+// "sling" feeds the NEW ownerSlingMult (Combat applies it ONLY to SLING-state ships).
+export const CROSSROADS = {
+  strength: [
+    { id: "overwhelm", lever: "strength", factor: 1.2 },
+    { id: "reaver", lever: "sling", factor: 1.5 },
+  ],
+  speed: [
+    { id: "blitz", lever: "speed", factor: 1.2 },
+    { id: "slipstream", lever: "sling", factor: 1.3 },
+  ],
+  regen: [
+    { id: "bloom", lever: "regen", factor: 1.3 },
+    { id: "fortify", lever: "strength", factor: 1.15 },
+  ],
+};
+
 // Per-tier multiplier increments. Level 0 → 1.0; each tier adds the increment.
 //   STRENGTH: 1 + 0.15*level  (L3 = 1.45)
 //   SPEED:    1 + 0.12*level  (L3 = 1.36)
@@ -64,37 +85,85 @@ export function buyTech(world, playerId, track) {
   return true;
 }
 
-// Owner-keyed multiplier accessors. Return EXACTLY 1.0 for a neutral/unknown owner or a
-// player with no tech in that track (level 0). Read in the hot paths (Combat/Seedlings/
-// Economy) to scale stats by the OWNING player's tech.
-function levelOf(world, ownerId, track) {
-  if (ownerId < 0) return 0;
-  const p = playerById(world, ownerId);
-  if (!p || !p.tech) return 0;
-  return p.tech[track] | 0;
+// chooseCrossroads — the sanctioned capstone-pick mutation. Valid ONLY when the player has the
+// track at MAX_TIER AND choiceId is one of that track's two capstones; sets
+// player.crossroads[track] = choiceId (init crossroads {} if absent), returns true. Otherwise NO
+// mutation, returns false. Both human (via Input) and the (default-off) AI knob route through it.
+export function chooseCrossroads(world, playerId, track, choiceId) {
+  const player = playerById(world, playerId);
+  if (!player) return false;
+  const opts = CROSSROADS[track];
+  if (!opts) return false;
+  if (!player.tech || (player.tech[track] | 0) !== MAX_TIER) return false;
+  if (!opts.some((o) => o.id === choiceId)) return false;
+  if (!player.crossroads) player.crossroads = {};
+  player.crossroads[track] = choiceId;
+  return true;
 }
 
+// capstoneFactor — the multiplicative bonus a player has earned on a given lever from its chosen
+// capstones, or 1.0 (no relevant capstone). Sums across every track whose chosen capstone targets
+// that lever (each capstone hits ONE lever, so at most one per track contributes). With no
+// crossroads chosen this returns EXACTLY 1.0 → accessors are unchanged → byte-identical.
+function capstoneFactor(player, lever) {
+  const cr = player && player.crossroads;
+  if (!cr) return 1;
+  let f = 1;
+  for (const track in CROSSROADS) {
+    const id = cr[track];
+    if (!id) continue;
+    const opt = CROSSROADS[track].find((o) => o.id === id);
+    if (opt && opt.lever === lever) f *= opt.factor;
+  }
+  return f;
+}
+
+// Owner-keyed multiplier accessors. Return EXACTLY 1.0 for a neutral/unknown owner or a
+// player with no tech in that track (level 0) AND no relevant capstone. Read in the hot paths
+// (Combat/Seedlings/Economy) to scale stats by the OWNING player's tech.
 export function ownerStrengthMult(world, ownerId) {
-  return strengthMult(levelOf(world, ownerId, TECH.STRENGTH));
+  if (ownerId < 0) return 1;
+  const p = playerById(world, ownerId);
+  if (!p || !p.tech) return 1;
+  return (
+    strengthMult(p.tech[TECH.STRENGTH] | 0) * capstoneFactor(p, "strength")
+  );
 }
 export function ownerSpeedMult(world, ownerId) {
-  return speedMult(levelOf(world, ownerId, TECH.SPEED));
+  if (ownerId < 0) return 1;
+  const p = playerById(world, ownerId);
+  if (!p || !p.tech) return 1;
+  return speedMult(p.tech[TECH.SPEED] | 0) * capstoneFactor(p, "speed");
 }
 export function ownerRegenMult(world, ownerId) {
-  return regenMult(levelOf(world, ownerId, TECH.REGEN));
+  if (ownerId < 0) return 1;
+  const p = playerById(world, ownerId);
+  if (!p || !p.tech) return 1;
+  return regenMult(p.tech[TECH.REGEN] | 0) * capstoneFactor(p, "regen");
+}
+// Sling-damage capstone multiplier (default 1.0 — no relevant capstone). Combat multiplies a
+// SLING-state ship's outgoing strength by this; non-SLING ships are unaffected.
+export function ownerSlingMult(world, ownerId) {
+  if (ownerId < 0) return 1;
+  const p = playerById(world, ownerId);
+  if (!p) return 1;
+  return capstoneFactor(p, "sling");
 }
 
 export default {
   TECH,
   MAX_TIER,
   TECH_COST,
+  CROSSROADS,
   techCost,
   initPlayerTech,
   buyTech,
+  chooseCrossroads,
   strengthMult,
   speedMult,
   regenMult,
   ownerStrengthMult,
   ownerSpeedMult,
   ownerRegenMult,
+  ownerSlingMult,
 };

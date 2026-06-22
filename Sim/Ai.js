@@ -12,7 +12,14 @@ import {
 import { countBombard, BATTERY_SIZE } from "./Trees.js";
 import { isArmed, BOMBARD_SEED_COST, BOMBARD_ENERGY_COST } from "./Bombard.js";
 import { queueCommand, CMD } from "./Commands.js";
-import { buyTech, techCost, TECH_TRACKS, MAX_TIER } from "./Tech.js";
+import {
+  buyTech,
+  techCost,
+  TECH_TRACKS,
+  MAX_TIER,
+  CROSSROADS,
+  chooseCrossroads,
+} from "./Tech.js";
 import { knownOwner, UNKNOWN } from "./Fog.js";
 
 // Difficulty knobs. 0 Easy · 1 Normal · 2 Hard · 3 Brutal. Higher = decides faster, commits
@@ -38,6 +45,7 @@ const KNOBS = [
     aggression: 0.0,
     techChance: 0,
     techBuffer: 0,
+    crossroadsAi: false,
   },
   {
     interval: 6.0,
@@ -47,6 +55,7 @@ const KNOBS = [
     aggression: 0.0,
     techChance: 0.04,
     techBuffer: 40,
+    crossroadsAi: false,
   },
   {
     interval: 1.5,
@@ -56,6 +65,7 @@ const KNOBS = [
     aggression: 0.55,
     techChance: 0.3,
     techBuffer: 20,
+    crossroadsAi: false,
   },
   {
     interval: 0.9,
@@ -65,6 +75,7 @@ const KNOBS = [
     aggression: 0.82,
     techChance: 0.45,
     techBuffer: 12,
+    crossroadsAi: false,
   },
 ];
 // Personality presets — multiplicative/additive modifiers on the NUMERIC knobs only.
@@ -166,6 +177,12 @@ export function effKnobs(player) {
     // still queues a plain CMD.SEND, byte-identical to the pre-raid fixtures. Personality never
     // flips it. Flip a KNOBS[d].raid to true to let that difficulty raid.
     raid: !!base.raid,
+    // Opt-in: pick a tier-3 capstone when a track maxes (rng-free, deterministic — always the
+    // FIRST option). DEFAULTS OFF for every shipped difficulty (no KNOB sets it), so no fixture
+    // ever sets crossroads → every accessor stays its pre-capstone value → byte-identical to the
+    // pre-crossroads fixtures (incl. Ai.test). Personality never flips it. Flip a
+    // KNOBS[d].crossroadsAi to true to let that difficulty fork.
+    crossroadsAi: !!base.crossroadsAi,
   };
 }
 
@@ -268,6 +285,19 @@ function maybeBuyTech(world, player, k) {
   if (player._techTick % period !== 0) return false;
   player._techRR = (start + 1) % TECH_TRACKS.length;
   return buyTech(world, player.id, TECH_TRACKS[pick]);
+}
+
+// maybeChooseCrossroads — opt-in (default OFF), deterministic, rng-free capstone pick. For each
+// maxed track with no capstone yet chosen, pick the FIRST option (index 0). Gated behind
+// k.crossroadsAi which is false for every shipped difficulty, so this is a no-op in normal play
+// and no fixture sets player.crossroads → accessors unchanged → byte-identical (incl. Ai.test).
+function maybeChooseCrossroads(world, player, k) {
+  if (!k.crossroadsAi || !player.tech) return;
+  for (const track of TECH_TRACKS) {
+    if ((player.tech[track] | 0) !== MAX_TIER) continue;
+    if (player.crossroads && player.crossroads[track]) continue;
+    chooseCrossroads(world, player.id, track, CROSSROADS[track][0].id);
+  }
 }
 
 // --- Bombard battery AI (rng-free, deterministic — mirrors maybeBuyTech's F3 principle) ------
@@ -529,6 +559,9 @@ function decide(world, player) {
   // Empire-wide tech investment — same develop gate as planting (Easy never develops). The
   // seed buffer inside keeps this from starving expansion.
   if (k.plant) maybeBuyTech(world, player, k);
+  // Tier-3 capstone fork — gated behind k.crossroadsAi (default OFF for all difficulties, so a
+  // no-op that doesn't touch crossroads → byte-identical). Reachable when a difficulty enables it.
+  maybeChooseCrossroads(world, player, k);
 
   // Find the owned rock with the largest deployable orbiter pool to attack/expand from.
   let from = null;
