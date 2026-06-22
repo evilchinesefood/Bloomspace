@@ -91,6 +91,7 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
   });
 
   let lastRenderMs = performance.now();
+  let eventSink = null;
 
   // --- FX polish: cheap, non-authoritative death + flower puffs (render READS sim only).
   let flowerTimer = 0;
@@ -151,6 +152,7 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
     for (let k = 0; k < ev.n; k++) {
       const type = ev.type[k];
       const own = ev.owner[k];
+      if (eventSink) eventSink(type, ev.x[k], ev.y[k], own, ev.x2[k], ev.y2[k]);
       if (type === EVENT.DEATH) {
         if (puffs < DEATH_PUFF_MAX && !fogHidden(ev.x[k], ev.y[k])) {
           fx.spawnDeath(ev.x[k], ev.y[k]); // puff only for battles the player can currently see
@@ -262,6 +264,10 @@ export function createGame(canvas, config = {}, restoredWorld = null) {
     getSendFraction: () => sendFraction,
     setSendFraction: (f) => {
       sendFraction = Math.max(0, Math.min(1, f));
+    },
+    // Additive event sink: set once by Overlay; called per-event inside the render drain.
+    setEventSink: (fn) => {
+      eventSink = fn || null;
     },
     // Camera/minimap controls: the visible world rect + a pan-to-center action.
     getViewRect: () => scene.getViewRect(),

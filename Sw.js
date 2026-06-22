@@ -17,6 +17,7 @@ const SHELL = [
   "Icons/Icon.svg",
   "Ui/App.js",
   "Ui/Hud.js",
+  "Ui/Overlay.js",
   "Ui/Menus.js",
   "Ui/Input.js",
   "Ui/Sound.js",

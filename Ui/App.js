@@ -5,6 +5,7 @@
 // the scene stays visible behind menus.
 import { createGame } from "../Game.js";
 import { createHud } from "./Hud.js";
+import { createOverlay } from "./Overlay.js";
 import {
   showStartMenu,
   showSkirmishSetup,
@@ -28,6 +29,7 @@ export function createApp(root) {
   let game = null; // current Game instance (null in MENU/SETUP)
   let canvas = null; // a FRESH canvas per match (see freshCanvas)
   let hud = null;
+  let overlay = null;
 
   // Each match gets a brand-new <canvas> behind the #Ui layer. Reusing one canvas breaks
   // re-launch: Game.destroy() force-loses its WebGL context to free it, and a context-lost
@@ -136,6 +138,10 @@ export function createApp(root) {
     }
     isTutorial = false;
     autosaveAcc = 0;
+    if (overlay) {
+      overlay.destroy();
+      overlay = null;
+    }
     if (hud) {
       hud.destroy();
       hud = null;
@@ -299,6 +305,11 @@ export function createApp(root) {
         saveQuality();
       },
     });
+    overlay = createOverlay(root, {
+      getViewRect: () => (game ? game.getViewRect() : null),
+      centerOn: (x, y) => game && game.centerOn(x, y),
+    });
+    game.setEventSink(overlay.push);
     state = APP_STATE.PLAYING;
   }
 
@@ -340,6 +351,7 @@ export function createApp(root) {
   function tick() {
     if (state === APP_STATE.PLAYING && game) {
       if (hud) hud.update();
+      if (overlay) overlay.update();
       // Drive the tutorial coachmark (tutorial mode only). Evaluated BEFORE the terminal check so
       // the final "Defeat the enemy" step registers the win the same frame the Victory screen shows.
       if (tutorial) tutorial.update();
