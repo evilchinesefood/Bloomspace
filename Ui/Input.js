@@ -5,10 +5,9 @@
 //   - drag the selected owned rock toward another rock: drives the in-world drag line.
 //   - release over a target rock: sendSeedlings(from, target, fraction, 0) + send FX.
 // All select highlight + drag indicator visuals come from Render (already built).
-import { sendSeedlings, setRally } from "../Sim/Seedlings.js";
-import { tryConnect } from "../Sim/MapGen.js";
-import { plantTree, clearTrees as clearTreesSim } from "../Sim/Trees.js";
-import { fireBombard, isArmed } from "../Sim/Bombard.js";
+import { clearTrees as clearTreesSim } from "../Sim/Trees.js";
+import { isArmed } from "../Sim/Bombard.js";
+import { queueCommand, CMD } from "../Sim/Commands.js";
 import { buyTech } from "../Sim/Tech.js";
 import { buyUpgrade } from "../Sim/Upgrade.js";
 import { ownerColorHex } from "../Render/Palette.js";
@@ -101,7 +100,12 @@ export function createInput({
         return;
       }
       if (clicked < 0) return; // missed an asteroid — keep armed, try again
-      setRally(world, src, clicked, HUMAN); // clicking src clears (toId === fromId)
+      queueCommand(world, {
+        type: CMD.RALLY,
+        from: src,
+        to: clicked,
+        owner: HUMAN,
+      }); // clicking src clears (toId === fromId)
       rallyMode = false;
       return;
     }
@@ -119,7 +123,13 @@ export function createInput({
         return;
       }
       if (clicked < 0) return; // missed — keep armed
-      if (clicked !== src) tryConnect(world, src, clicked, HUMAN);
+      if (clicked !== src)
+        queueCommand(world, {
+          type: CMD.CONNECT,
+          from: src,
+          to: clicked,
+          owner: HUMAN,
+        });
       connectMode = false;
       return;
     }
@@ -136,7 +146,12 @@ export function createInput({
         return;
       }
       if (clicked < 0) return; // missed a body — keep armed, try again
-      fireBombard(world, src, clicked, HUMAN);
+      queueCommand(world, {
+        type: CMD.FIRE,
+        from: src,
+        to: clicked,
+        owner: HUMAN,
+      });
       fireMode = false;
       return;
     }
@@ -182,7 +197,13 @@ export function createInput({
     if (!from || !to || fromId === toId) return;
     if (from.owner !== HUMAN) return;
     const frac = getSendFraction();
-    const sent = sendSeedlings(world, fromId, toId, frac, HUMAN);
+    const sent = queueCommand(world, {
+      type: CMD.SEND,
+      from: fromId,
+      to: toId,
+      fraction: frac,
+      owner: HUMAN,
+    });
     if (sent > 0) views.fx.spawnSend(from.x, from.y, ownerColorHex(HUMAN));
   }
 
@@ -218,7 +239,12 @@ export function createInput({
     const world = getWorld();
     const id = selectedId();
     if (id < 0 || !world.asteroids[id]) return false;
-    return plantTree(world, id, type, HUMAN);
+    return queueCommand(world, {
+      type: CMD.PLANT,
+      rock: id,
+      treeType: type,
+      owner: HUMAN,
+    });
   }
 
   // Tech-buy action for the HUD's empire-wide tech panel (player 0). Affordability/headroom

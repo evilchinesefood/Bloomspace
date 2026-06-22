@@ -9,14 +9,9 @@ import {
   EVENT,
   pushEvent,
 } from "./World.js";
-import { sendSeedlings } from "./Seedlings.js";
-import { plantTree, countBombard, BATTERY_SIZE } from "./Trees.js";
-import {
-  fireBombard,
-  isArmed,
-  BOMBARD_SEED_COST,
-  BOMBARD_ENERGY_COST,
-} from "./Bombard.js";
+import { countBombard, BATTERY_SIZE } from "./Trees.js";
+import { isArmed, BOMBARD_SEED_COST, BOMBARD_ENERGY_COST } from "./Bombard.js";
+import { queueCommand, CMD } from "./Commands.js";
 import { buyTech, techCost, TECH_TRACKS, MAX_TIER } from "./Tech.js";
 import { knownOwner, UNKNOWN } from "./Fog.js";
 
@@ -386,7 +381,15 @@ function maybeBombard(world, player, host, bk, orbAny) {
     player._bombFireTick = (player._bombFireTick | 0) + 1;
     if (player._bombFireTick % bk.fireEvery === 0) {
       const target = pickBombTarget(world, orbAny);
-      if (target && fireBombard(world, armed.id, target.id, id))
+      if (
+        target &&
+        queueCommand(world, {
+          type: CMD.FIRE,
+          from: armed.id,
+          to: target.id,
+          owner: id,
+        })
+      )
         player._bombFires = (player._bombFires | 0) + 1;
     }
     return -1; // a finished/armed battery isn't "building" — don't reserve the rock
@@ -414,7 +417,14 @@ function maybeBombard(world, player, host, bk, orbAny) {
   if (host.energy < energyGate) return host.id; // bank energy (rock reserved, no normal trees)
   player._bombPlanTick = (player._bombPlanTick | 0) + 1;
   if (player._bombPlanTick % bk.planEvery !== 0) return host.id;
-  if (plantTree(world, host.id, "bombard", id))
+  if (
+    queueCommand(world, {
+      type: CMD.PLANT,
+      rock: host.id,
+      treeType: "bombard",
+      owner: id,
+    })
+  )
     player._bombPlants = (player._bombPlants | 0) + 1;
   return host.id;
 }
@@ -471,7 +481,12 @@ function decide(world, player) {
     if (host) {
       const hasSeedling = host.trees.some((t) => t.type === "seedling");
       const type = hasSeedling ? "defense" : "seedling";
-      plantTree(world, host.id, type, id);
+      queueCommand(world, {
+        type: CMD.PLANT,
+        rock: host.id,
+        treeType: type,
+        owner: id,
+      });
     }
   }
 
@@ -521,7 +536,13 @@ function decide(world, player) {
   if (!target || opportunistic) target = enemy || neutral;
   if (!target) return 0; // no valid target — no-op
 
-  return sendSeedlings(world, from.id, target.id, k.fraction, id);
+  return queueCommand(world, {
+    type: CMD.SEND,
+    from: from.id,
+    to: target.id,
+    fraction: k.fraction,
+    owner: id,
+  });
 }
 
 // updateAi — tick every AI player's decision timer; act only when it elapses.

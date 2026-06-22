@@ -46,6 +46,7 @@ const SHELL = [
   "Sim/Trees.js",
   "Sim/Bombard.js",
   "Sim/Upgrade.js",
+  "Sim/Commands.js",
   "Sim/Ai.js",
   "Sim/Save.js",
   "Sim/Hazards.js",

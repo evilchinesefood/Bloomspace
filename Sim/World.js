@@ -11,6 +11,7 @@ import { updateBombard } from "./Bombard.js";
 import { initPlayerTech } from "./Tech.js";
 import { initHazards, stepHazards } from "./Hazards.js";
 import { initFog, computeFog, FOG_TICKS } from "./Fog.js";
+import { drainCommands } from "./Commands.js";
 
 export const STARTING_SEEDS = 10;
 
@@ -242,6 +243,11 @@ export function createWorld(config = {}) {
   // save/resume. Belts also remove the travel edges that cross them (graph reshaped, not bodies).
   world.nebulae = [];
   world.belts = [];
+  // Staged-orders list for the command seam (Sim/Commands.js). Empty in normal play — human
+  // staged-while-paused orders (a later step) push here and drainCommands applies them at the top
+  // of step(). World-level + JSON-serializable (step 9 serializes it); drainCommands tolerates an
+  // older deserialized world that lacks the field.
+  world.pendingCommands = [];
   // Procedurally place asteroids + seed each player's home orbit (deterministic).
   generateMap(world, config, spawnSeedling);
   // Assign personality to each AI player AFTER map generation. No world.rng() is consumed here
@@ -355,6 +361,10 @@ export function step(world, dt) {
   // render), not per step, so stepStats must only count events appended during THIS step — pass
   // the mark so it scans [eventsFrom, e.n) and doesn't re-count earlier steps in a multi-step frame.
   const eventsFrom = world.events.n;
+  // Apply any human staged-while-paused orders at the START of the tick (owner-ascending), before
+  // anything moves, so the world — including the AI — simulates with them already in effect. The
+  // list is empty in normal play, so this is a no-op (byte-identical); it activates in a later step.
+  drainCommands(world);
   // Snapshot positions for render interpolation (allocation-free — subarray would alloc a view).
   for (let i = 0; i < s.count; i++) {
     s.px[i] = s.x[i];
