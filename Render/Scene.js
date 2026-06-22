@@ -11,6 +11,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { reducedMotion } from "./Theme.js";
 
 // Bloom runs at half-resolution per the perf budget.
 const BLOOM_SCALE = 0.5;
@@ -24,13 +25,6 @@ const BLOOM_THRESHOLD = 0.55;
 const MIN_ZOOM = 0.82; // allow pulling back a little past fit-all to see the whole map
 const MAX_ZOOM = 8; // sane close-in limit
 const ZOOM_STEP = 1.0015; // per wheel-delta unit
-
-// prefers-reduced-motion: when the OS/browser requests reduced motion we pause the ambient
-// starfield drift (the only purely-decorative continuous motion in the scene). Bloom's default
-// is handled in App.js (a saved user choice still wins); here we just gate the drift.
-const prefersReducedMotion = () =>
-  typeof window.matchMedia === "function" &&
-  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export function createScene(canvas, world) {
   const renderer = new THREE.WebGLRenderer({
@@ -82,11 +76,14 @@ export function createScene(canvas, world) {
   }
   addStars();
 
+  // Construction-time snapshot for AsteroidView / Game.sceneReducedMotion (battery-pulse toggle
+  // applies on next match; the primary motion — starfield + Fx — toggles live via reducedMotion()).
+  const reducedMotionSnap = reducedMotion();
+
   // Subtle starfield drift (downward), wrapping. Called each render frame with dt. Becomes a
-  // no-op under prefers-reduced-motion (the stars stay put — still rendered, just not moving).
-  const reducedMotion = prefersReducedMotion();
+  // no-op under reduced-motion (checked live so toggling stops/starts the starfield mid-match).
   function driftStars(dt) {
-    if (reducedMotion) return;
+    if (reducedMotion()) return;
     for (const t of starTiers) {
       const p = t.geo.attributes.position.array;
       const sp = t.speeds;
@@ -421,7 +418,7 @@ export function createScene(canvas, world) {
     setBloomEnabled,
     disposeControls,
     driftStars,
-    reducedMotion, // true when prefers-reduced-motion: reduce (drift paused, FX damped)
+    reducedMotion: reducedMotionSnap, // construction-time snapshot; AsteroidView battery pulses apply next match
     isContextLost: () => contextLost,
     // Live zoom factor (1 = fit-all, >1 = zoomed in).
     getZoom: () => zoom,

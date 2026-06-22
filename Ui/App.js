@@ -13,6 +13,7 @@ import {
 } from "./Menus.js";
 import { createTutorial, TUTORIAL_CONFIG } from "./Tutorial.js";
 import { WORLD_STATUS } from "../Sim/World.js";
+import { reducedMotion } from "../Render/Theme.js";
 import { writeSave, readSave, hasSave, clearSave } from "./Persist.js";
 
 export const APP_STATE = {
@@ -75,11 +76,8 @@ export function createApp(root) {
   // Persisted quality settings (survive New Game AND reloads). Reduced-motion sets the bloom
   // DEFAULT (off when the user prefers reduced motion), but any saved choice still wins.
   const QUALITY_KEY = "bloomspace.quality";
-  const reduceMotion =
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const quality = {
-    bloom: !reduceMotion, // effective default; overridden by saved value below
+    bloom: !reducedMotion(), // effective default; overridden by saved value below
     seedlingCap: 0, // cap 0 = uncapped
     sfx: true,
     music: true,

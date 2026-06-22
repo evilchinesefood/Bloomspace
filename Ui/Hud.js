@@ -4,6 +4,7 @@
 // Chrome only: it READS sim state and CALLS the action callbacks; it never mutates world.
 import { el } from "./Menus.js";
 import { ownerColorHex } from "../Render/Palette.js";
+import * as Theme from "../Render/Theme.js";
 import { createMinimap } from "../Render/Minimap.js";
 import { TREE_SEED_COST, TREE_ENERGY_COST } from "../Sim/Trees.js";
 import {
@@ -360,6 +361,55 @@ export function createHud(root, api) {
   capSelect.addEventListener("change", onCap);
   capSelect.addEventListener("wa-change", onCap);
 
+  // Palette select — switches color palette live (meshes re-read color next frame).
+  const paletteSelect = el("wa-select", {
+    label: "Color palette",
+    size: "small",
+    style: "display:block;margin-bottom:.4rem;",
+  });
+  paletteSelect.append(
+    el("wa-option", { value: "default", textContent: "Default" }),
+  );
+  paletteSelect.append(
+    el("wa-option", { value: "colorblind", textContent: "Colorblind" }),
+  );
+  paletteSelect.value = Theme.getPalette();
+  if (window.customElements && customElements.whenDefined)
+    customElements.whenDefined("wa-select").then(() => {
+      paletteSelect.value = Theme.getPalette();
+    });
+  const onPalette = () => Theme.setPalette(paletteSelect.value);
+  paletteSelect.addEventListener("change", onPalette);
+  paletteSelect.addEventListener("wa-change", onPalette);
+
+  // Reduce-motion select — drives starfield drift + Fx scalars live.
+  const motionSelect = el("wa-select", {
+    label: "Reduce motion",
+    size: "small",
+    style: "display:block;margin-bottom:.4rem;",
+  });
+  motionSelect.append(el("wa-option", { value: "auto", textContent: "Auto" }));
+  motionSelect.append(el("wa-option", { value: "on", textContent: "On" }));
+  motionSelect.append(el("wa-option", { value: "off", textContent: "Off" }));
+  motionSelect.value = Theme.getMotionPref();
+  if (window.customElements && customElements.whenDefined)
+    customElements.whenDefined("wa-select").then(() => {
+      motionSelect.value = Theme.getMotionPref();
+    });
+  const onMotion = () => Theme.setMotionPref(motionSelect.value);
+  motionSelect.addEventListener("change", onMotion);
+  motionSelect.addEventListener("wa-change", onMotion);
+
+  // Colorblind tags — draws per-owner shapes on the minimap in addition to color.
+  const tagsSwitch = el("wa-switch", {
+    style: "display:block;margin-bottom:.6rem;",
+    textContent: "Colorblind tags",
+  });
+  if (Theme.getTags()) tagsSwitch.setAttribute("checked", "");
+  const onTags = () => Theme.setTags(tagsSwitch.checked);
+  tagsSwitch.addEventListener("change", onTags);
+  tagsSwitch.addEventListener("wa-change", onTags);
+
   settings.append(
     el("div", { style: "min-width:180px;font:500 .85rem system-ui;" }, [
       el("div", {
@@ -371,9 +421,17 @@ export function createHud(root, api) {
       musicSwitch,
       capSelect,
       el("div", {
-        style: "opacity:.8;font-size:.72rem;line-height:1.3;",
+        style:
+          "opacity:.8;font-size:.72rem;line-height:1.3;margin-bottom:.6rem;",
         textContent: "Cap limits drawn seedlings only — the sim is unchanged.",
       }),
+      el("div", {
+        style: "font-weight:600;margin-bottom:.4rem;margin-top:.2rem;",
+        textContent: "Accessibility",
+      }),
+      paletteSelect,
+      motionSelect,
+      tagsSwitch,
     ]),
   );
   bar.append(settings);

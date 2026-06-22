@@ -6,6 +6,7 @@
 // Throttled to ~30 Hz so it costs nothing on top of the render loop.
 import { ownerColorHex } from "./Palette.js";
 import { UNKNOWN } from "../Sim/Fog.js";
+import { getTags, ownerShape } from "./Theme.js";
 
 // Fog render state for the human (player 0) on rock r: 2 seen · 1 remembered · 0 never-explored.
 // 2 always when fog is off (minimap unchanged in that mode).
@@ -27,6 +28,73 @@ const DOT_MIN = 1.6; // smallest drawn body radius (px) so tiny rocks stay visib
 const DOT_MAX = 6; // clamp so a planet/star dot doesn't dominate
 
 const css = (n) => "#" + (n >>> 0).toString(16).padStart(6, "0").slice(-6);
+
+// Draw a filled shape (canvas 2D path primitives) for colorblind non-color tagging.
+function drawShape(ctx, x, y, r, shape, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  switch (shape) {
+    case "circle":
+    case "dot":
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      break;
+    case "square": {
+      const s = r * 1.6;
+      ctx.rect(x - s / 2, y - s / 2, s, s);
+      break;
+    }
+    case "triangle": {
+      const h = r * 1.8;
+      ctx.moveTo(x, y - h);
+      ctx.lineTo(x + h * 0.87, y + h * 0.5);
+      ctx.lineTo(x - h * 0.87, y + h * 0.5);
+      ctx.closePath();
+      break;
+    }
+    case "diamond": {
+      const d = r * 1.6;
+      ctx.moveTo(x, y - d);
+      ctx.lineTo(x + d * 0.7, y);
+      ctx.lineTo(x, y + d);
+      ctx.lineTo(x - d * 0.7, y);
+      ctx.closePath();
+      break;
+    }
+    case "star": {
+      const outer = r * 1.8,
+        inner = r * 0.75;
+      for (let i = 0; i < 10; i++) {
+        const a = (Math.PI / 5) * i - Math.PI / 2;
+        const rad = i % 2 === 0 ? outer : inner;
+        i === 0
+          ? ctx.moveTo(x + rad * Math.cos(a), y + rad * Math.sin(a))
+          : ctx.lineTo(x + rad * Math.cos(a), y + rad * Math.sin(a));
+      }
+      ctx.closePath();
+      break;
+    }
+    case "cross": {
+      const arm = r * 1.6,
+        thick = r * 0.55;
+      ctx.rect(x - arm, y - thick, arm * 2, thick * 2);
+      ctx.rect(x - thick, y - arm, thick * 2, arm * 2);
+      break;
+    }
+    case "hexagon": {
+      for (let i = 0; i < 6; i++) {
+        const a = (Math.PI / 3) * i - Math.PI / 6;
+        const hx = x + r * 1.5 * Math.cos(a);
+        const hy = y + r * 1.5 * Math.sin(a);
+        i === 0 ? ctx.moveTo(hx, hy) : ctx.lineTo(hx, hy);
+      }
+      ctx.closePath();
+      break;
+    }
+    default:
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+  }
+  ctx.fill();
+}
 
 export function createMinimap(root, getWorld, camera) {
   // Size the panel to the map's aspect: long edge = SIZE, short edge proportional.
@@ -169,10 +237,22 @@ export function createMinimap(root, getWorld, camera) {
         ctx.globalAlpha = 1;
         continue;
       }
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = css(ownerColorHex(fogOwner(world, a.id, a.owner)));
-      ctx.fill();
+      const fillColor = css(ownerColorHex(fogOwner(world, a.id, a.owner)));
+      if (getTags()) {
+        drawShape(
+          ctx,
+          p.x,
+          p.y,
+          r,
+          ownerShape(fogOwner(world, a.id, a.owner)),
+          fillColor,
+        );
+      } else {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+      }
       ctx.globalAlpha = 1;
     }
 

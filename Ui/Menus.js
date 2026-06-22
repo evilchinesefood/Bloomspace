@@ -1,6 +1,7 @@
 // Ui/Menus.js — full-screen overlays drawn with Web Awesome: the start menu, the
 // skirmish setup dialog, and the win/lose screen. Each is a function that builds DOM into
 // the #Ui layer and resolves/calls back when the player acts. Chrome only; no sim/render.
+import { paletteColorHex } from "../Render/Theme.js";
 const SIZES = {
   small: {
     width: 1100,
@@ -516,12 +517,9 @@ function hexToCss(n) {
   return "#" + (n >>> 0).toString(16).padStart(6, "0");
 }
 
-// Mirrors Render/Palette.js ownerColorHex — keep in sync; can't import Palette (pulls three.js).
-const P_COLORS = [
-  0x46e8ff, 0xff5a7a, 0x8a7bff, 0xffc24b, 0x5dff9b, 0xff8a3d, 0xff6bff,
-];
+// owner 0 = human (player), 1..N = AI — matches Palette.js ownerColorHex mapping.
 function playerColor(id) {
-  return hexToCss(P_COLORS[id] ?? P_COLORS[P_COLORS.length - 1]);
+  return hexToCss(paletteColorHex(id));
 }
 
 // Inline SVG sparkline of territory over time. W×H in px. Returns an <svg> element or null

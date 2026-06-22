@@ -21,9 +21,8 @@ function makeWindow(matches) {
 // Node ESM caches modules, so we use a cache-busting query string.
 let _n = 0;
 async function freshTheme() {
-  const { getMotionPref, setMotionPref, reducedMotion, motionScalars } =
-    await import(`../Render/Theme.js?t=${_n++}`);
-  return { getMotionPref, setMotionPref, reducedMotion, motionScalars };
+  const mod = await import(`../Render/Theme.js?t=${_n++}`);
+  return mod;
 }
 
 let _origWindow, _origLS;
@@ -148,4 +147,177 @@ test("storage failure does not throw", async () => {
   const { setMotionPref, getMotionPref } = await freshTheme();
   assert.doesNotThrow(() => setMotionPref("on"));
   assert.equal(getMotionPref(), "on"); // in-memory still updated
+});
+
+// --- Palette tests ---
+
+test("default palette is 'default'", async () => {
+  delete globalThis.window;
+  delete globalThis.localStorage;
+  const { getPalette } = await freshTheme();
+  assert.equal(getPalette(), "default");
+});
+
+test("setPalette/getPalette round-trip", async () => {
+  globalThis.window = makeWindow(false);
+  globalThis.localStorage = makeStorage();
+  const { setPalette, getPalette } = await freshTheme();
+  setPalette("colorblind");
+  assert.equal(getPalette(), "colorblind");
+});
+
+test("setPalette persists to storage", async () => {
+  globalThis.window = makeWindow(false);
+  const store = makeStorage();
+  globalThis.localStorage = store;
+  const { setPalette } = await freshTheme();
+  setPalette("colorblind");
+  const blob = JSON.parse(store.getItem("bloomspace.theme"));
+  assert.equal(blob.palette, "colorblind");
+});
+
+test("setPalette clamps invalid value to 'default'", async () => {
+  globalThis.window = makeWindow(false);
+  globalThis.localStorage = makeStorage();
+  const { setPalette, getPalette } = await freshTheme();
+  setPalette("neon");
+  assert.equal(getPalette(), "default");
+});
+
+test("_load restores palette from storage", async () => {
+  globalThis.window = makeWindow(false);
+  const store = makeStorage();
+  store.setItem("bloomspace.theme", JSON.stringify({ palette: "colorblind" }));
+  globalThis.localStorage = store;
+  const { getPalette } = await freshTheme();
+  assert.equal(getPalette(), "colorblind");
+});
+
+test("paletteColorHex: default palette neutral (owner -1)", async () => {
+  globalThis.window = makeWindow(false);
+  globalThis.localStorage = makeStorage();
+  const { setPalette, paletteColorHex } = await freshTheme();
+  setPalette("default");
+  assert.equal(paletteColorHex(-1), 0x556070);
+});
+
+test("paletteColorHex: default palette player (owner 0)", async () => {
+  globalThis.window = makeWindow(false);
+  globalThis.localStorage = makeStorage();
+  const { setPalette, paletteColorHex } = await freshTheme();
+  setPalette("default");
+  assert.equal(paletteColorHex(0), 0x46e8ff);
+});
+
+test("paletteColorHex: default palette first AI (owner 1)", async () => {
+  globalThis.window = makeWindow(false);
+  globalThis.localStorage = makeStorage();
+  const { setPalette, paletteColorHex } = await freshTheme();
+  setPalette("default");
+  assert.equal(paletteColorHex(1), 0xff5a7a);
+});
+
+test("paletteColorHex: colorblind palette player (owner 0)", async () => {
+  globalThis.window = makeWindow(false);
+  globalThis.localStorage = makeStorage();
+  const { setPalette, paletteColorHex } = await freshTheme();
+  setPalette("colorblind");
+  assert.equal(paletteColorHex(0), 0x56b4e9);
+});
+
+test("paletteColorHex: colorblind palette first AI (owner 1)", async () => {
+  globalThis.window = makeWindow(false);
+  globalThis.localStorage = makeStorage();
+  const { setPalette, paletteColorHex } = await freshTheme();
+  setPalette("colorblind");
+  assert.equal(paletteColorHex(1), 0xe69f00);
+});
+
+test("paletteColorHex: AI wraps by index (owner 7 = owner 1)", async () => {
+  globalThis.window = makeWindow(false);
+  globalThis.localStorage = makeStorage();
+  const { setPalette, paletteColorHex } = await freshTheme();
+  setPalette("default");
+  assert.equal(paletteColorHex(7), paletteColorHex(1));
+});
+
+test("paletteColorHex switches live when palette changes", async () => {
+  globalThis.window = makeWindow(false);
+  globalThis.localStorage = makeStorage();
+  const { setPalette, paletteColorHex } = await freshTheme();
+  setPalette("default");
+  const def = paletteColorHex(0);
+  setPalette("colorblind");
+  const cb = paletteColorHex(0);
+  assert.notEqual(def, cb);
+  assert.equal(cb, 0x56b4e9);
+});
+
+// --- Tags tests ---
+
+test("default tags is false", async () => {
+  delete globalThis.window;
+  delete globalThis.localStorage;
+  const { getTags } = await freshTheme();
+  assert.equal(getTags(), false);
+});
+
+test("setTags/getTags round-trip", async () => {
+  globalThis.window = makeWindow(false);
+  globalThis.localStorage = makeStorage();
+  const { setTags, getTags } = await freshTheme();
+  setTags(true);
+  assert.equal(getTags(), true);
+  setTags(false);
+  assert.equal(getTags(), false);
+});
+
+test("setTags persists to storage", async () => {
+  globalThis.window = makeWindow(false);
+  const store = makeStorage();
+  globalThis.localStorage = store;
+  const { setTags } = await freshTheme();
+  setTags(true);
+  const blob = JSON.parse(store.getItem("bloomspace.theme"));
+  assert.equal(blob.tags, true);
+});
+
+test("_load restores tags from storage", async () => {
+  globalThis.window = makeWindow(false);
+  const store = makeStorage();
+  store.setItem("bloomspace.theme", JSON.stringify({ tags: true }));
+  globalThis.localStorage = store;
+  const { getTags } = await freshTheme();
+  assert.equal(getTags(), true);
+});
+
+// --- ownerShape tests ---
+
+test("ownerShape: neutral (owner -1) → 'dot'", async () => {
+  delete globalThis.localStorage;
+  const { ownerShape } = await freshTheme();
+  assert.equal(ownerShape(-1), "dot");
+});
+
+test("ownerShape: player (owner 0) → 'circle'", async () => {
+  delete globalThis.localStorage;
+  const { ownerShape } = await freshTheme();
+  assert.equal(ownerShape(0), "circle");
+});
+
+test("ownerShape: AI owners map to distinct shapes", async () => {
+  delete globalThis.localStorage;
+  const { ownerShape } = await freshTheme();
+  assert.equal(ownerShape(1), "square");
+  assert.equal(ownerShape(2), "triangle");
+  assert.equal(ownerShape(3), "diamond");
+  assert.equal(ownerShape(4), "star");
+  assert.equal(ownerShape(5), "cross");
+  assert.equal(ownerShape(6), "hexagon");
+});
+
+test("ownerShape wraps for AI beyond 6", async () => {
+  delete globalThis.localStorage;
+  const { ownerShape } = await freshTheme();
+  assert.equal(ownerShape(7), ownerShape(1));
 });
